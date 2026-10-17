@@ -1,0 +1,57 @@
+{
+  "description": "Synthetic test clips with known tempo, downbeats, structure and key. Rendered by generate.py; the audio is generated from scratch, so it is CC0 like the rest of this directory.",
+  "clips": [
+    {
+      "name": "house_124_a_minor",
+      "format": "wav",
+      "bpm": 124.0,
+      "firstDownbeat": 0.25,
+      "key": { "name": "A minor", "camelot": "8A" },
+      "progression": [[9, "minor"], [2, "minor"], [4, "major"], [9, "minor"]],
+      "sections": [
+        { "bars": 8, "parts": ["kick", "clap", "hats"] },
+        { "bars": 8, "parts": ["kick", "clap", "hats", "bass", "chords"] },
+        { "bars": 8, "parts": ["chords", "hats"] },
+        { "bars": 8, "parts": ["kick", "clap", "hats", "bass", "chords"] }
+      ]
+    },
+    {
+      "name": "techno_128_f_sharp_minor",
+      "format": "flac",
+      "bpm": 128.0,
+      "firstDownbeat": 0.6,
+      "key": { "name": "F# minor", "camelot": "11A" },
+      "progression": [[6, "minor"], [2, "major"], [6, "minor"], [4, "major"]],
+      "sections": [
+        { "bars": 8, "parts": ["kick", "hats"] },
+        { "bars": 16, "parts": ["kick", "clap", "hats", "bass", "chords"] },
+        { "bars": 8, "parts": ["kick", "hats", "bass"] }
+      ]
+    },
+    {
+      "name": "pop_100_c_major",
+      "format": "aiff",
+      "bpm": 100.0,
+      "firstDownbeat": 0.1,
+      "key": { "name": "C major", "camelot": "8B" },
+      "progression": [[0, "major"], [5, "major"], [7, "major"], [0, "major"]],
+      "sections": [
+        { "bars": 8, "parts": ["kick", "snare", "hats", "bass", "chords"] },
+        { "bars": 8, "parts": ["chords"] },
+        { "bars": 8, "parts": ["kick", "snare", "hats", "bass", "chords"] }
+      ]
+    },
+    {
+      "name": "deep_120_d_minor",
+      "format": "mp3",
+      "bpm": 120.0,
+      "firstDownbeat": 0.4,
+      "key": { "name": "D minor", "camelot": "7A" },
+      "progression": [[2, "minor"], [7, "minor"], [9, "major"], [2, "minor"]],
+      "sections": [
+        { "bars": 8, "parts": ["kick", "hats", "bass"] },
+        { "bars": 8, "parts": ["kick", "clap", "hats", "bass", "chords"] }
+      ]
+    }
+  ]
+}

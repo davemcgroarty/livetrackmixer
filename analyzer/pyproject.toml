@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "djanalyze"
+dynamic = ["version"]
+description = "Beat, bar, phrase, section, key and content analysis for the DJ Mixer app"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-only"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "soundfile>=0.12",
+    "soxr>=0.3",
+    "librosa>=0.10",
+    "jsonschema>=4.18",
+]
+
+[project.optional-dependencies]
+# The models the design spec names. They need PyTorch and, for allin1, NATTEN and
+# madmom, which have no wheels for every platform and Python version; djanalyze
+# falls back to its built-in librosa estimators for whatever is missing.
+models = [
+    "allin1",
+    "beat-this",
+    "essentia",
+]
+dev = ["pytest>=7"]
+
+[project.scripts]
+djanalyze = "djanalyze.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "djanalyze.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["djanalyze*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
