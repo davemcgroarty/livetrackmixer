@@ -18,7 +18,7 @@ Exit codes: 0 success or cached, 1 analysis failed, 2 no such input file.
 
 | Stage | With the models installed | Built-in fallback |
 | --- | --- | --- |
-| Beats and downbeats | allin1 | librosa beat tracker; downbeat phase from chord changes and low-frequency onsets |
+| Beats and downbeats | allin1 | constant grid fitted to the onset envelope (librosa's tracker for variable tempo); downbeat phase from chord changes and low-frequency onsets |
 | Downbeat cross-check | Beat This!: over 10% of bars disagreeing sets `confidence.beats` to 0.3 | none; `confidence.beats` is capped at 0.7 |
 | Sections | allin1 segments snapped to bars, labels discarded | Foote novelty on a bar-by-bar self-similarity matrix (MFCC, chroma, band levels) |
 | Key, overall and per section | Essentia `KeyExtractor` (EDMA profile) | Log-compressed harmonic chroma against Albrecht–Shanahan key profiles |
@@ -27,11 +27,16 @@ Exit codes: 0 success or cached, 1 analysis failed, 2 no such input file.
 
 Common to both engines:
 
-- **Constant-tempo grid.** Detected beats are fitted with a straight line, and
-  the grid's phase is refined against the onset envelope. When the beats sit
-  within 8% of a beat of the line (median), the grid becomes the beat list,
-  from the first beat after 0 s to the end of the file. Otherwise
-  `tempo.variable` is true and the detected beats are kept.
+- **Constant-tempo grid.** With the built-in engine, the tempo is searched
+  near the onset envelope's main periodicity for the beat period at which the
+  whole track's onsets line up most sharply, and the grid's phase is then
+  refined to 1 ms. The grid is checked against the music in 16-beat windows:
+  the share of rhythmic windows whose own beat phase is within 25 ms of the
+  grid is the beat confidence (capped at 0.7 without a second model). Below
+  0.5 the track counts as variable tempo (`tempo.variable`) and keeps the beats
+  librosa's tracker found. This holds up where a beat tracker briefly follows
+  syncopation. With allin1, its beats are fitted with a straight line instead,
+  and a median deviation over 8% of a beat makes the track variable.
 - **Bars** start at each downbeat, numbered from 1. 4/4 is assumed.
 - **Phrases** are 8 bars, or 16 in sections of 32 bars or more that divide
   evenly. Every section boundary starts a phrase. The final phrase of a section

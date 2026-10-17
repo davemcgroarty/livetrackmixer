@@ -34,6 +34,44 @@ def test_fit_grid_does_not_drift_over_a_long_track():
     assert deviation < 0.01
 
 
+def _impulse_envelope(beat_times, sr=44100, duration=None, strengths=None):
+    frame = beats.ONSET_HOP / sr
+    duration = duration if duration is not None else float(np.max(beat_times)) + 1.0
+    envelope = np.zeros(int(duration / frame) + 1)
+    for i, t in enumerate(beat_times):
+        envelope[int(round(t / frame))] += 1.0 if strengths is None else strengths[i]
+    return envelope
+
+
+def test_constant_grid_survives_syncopation():
+    """Loud off-beat hits for a stretch (which throw a beat tracker) must not
+    move the grid or make the track look variable."""
+    sr, period = 44100, 60 / 126
+    on_beat = 0.31 + period * np.arange(600)
+    off_beat = on_beat[200:232] + period / 2  # 8 bars of strong syncopation
+    times = np.concatenate([on_beat, off_beat])
+    strengths = np.concatenate([np.ones(len(on_beat)), np.full(len(off_beat), 1.5)])
+    grid = beats.fit_constant_grid(_impulse_envelope(times, sr, strengths=strengths), sr, 125.0)
+    assert 60 / grid.period == pytest.approx(126, abs=0.01)
+    assert (grid.offset - 0.31 + grid.period / 2) % grid.period - grid.period / 2 == pytest.approx(0, abs=0.006)
+    assert grid.consistency > 0.8
+
+
+def test_drifting_tempo_is_not_a_constant_grid():
+    sr = 44100
+    # A live-played feel: tempo wanders from 120 to 128 BPM and back.
+    bpm = 124 + 4 * np.sin(np.linspace(0, 2 * np.pi, 500))
+    times = np.cumsum(60 / bpm)
+    grid = beats.fit_constant_grid(_impulse_envelope(times, sr), sr, 124.0)
+    assert grid.consistency < beats.MIN_GRID_CONSISTENCY
+
+
+def test_fold_bpm():
+    assert beats.fold_bpm(62) == 124
+    assert beats.fold_bpm(260) == 130
+    assert beats.fold_bpm(128) == 128
+
+
 def test_constant_grid_starts_at_the_first_beat_after_zero():
     grid = beats.constant_grid(0.5, 1.3, 3.0)
     assert grid == pytest.approx([0.3, 0.8, 1.3, 1.8, 2.3, 2.8])

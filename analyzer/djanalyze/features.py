@@ -105,9 +105,9 @@ class Spectral:
 
     def frames(self, start: float, end: float) -> slice:
         """Frames whose centres fall in [start, end)."""
-        first = max(0, int(np.ceil(start / self.frame_seconds)))
+        first = min(max(0, int(np.ceil(start / self.frame_seconds))), self.num_frames - 1)
         last = max(first + 1, int(np.ceil(end / self.frame_seconds)))
-        return slice(first, min(last, self.num_frames))
+        return slice(first, min(last, self.num_frames))  # never empty, even for a bar in the last frame
 
 
 def compute(mono: np.ndarray, sr: int, on_progress: ProgressCallback | None = None) -> Spectral:
