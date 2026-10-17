@@ -108,7 +108,7 @@ TEST_CASE ("The library database stores tracks and their analysis", "[library][d
         db.setStatus (id, AnalysisStatus::failed, "no decoder");
         CHECK (db.track (id)->error == "no decoder");
 
-        db.setAnalysis (id, { "sha256:abc", 124.0, "A minor", "8A", 372.4, 0.93, dir.path / "a.json" });
+        db.setAnalysis (id, { "sha256:abc", 124.0, "A minor", "8A", 372.4, 0.93, dir.path / "a.json", "0.1.2" });
         db.setColour (id, 7);
     }
 
@@ -129,6 +129,7 @@ TEST_CASE ("The library database stores tracks and their analysis", "[library][d
     CHECK (*t.durationSec == Catch::Approx (372.4));
     CHECK (*t.beatConfidence == Catch::Approx (0.93));
     CHECK (t.analysisFile == dir.path / "a.json");
+    CHECK (t.analyzerVersion == "0.1.2");
     CHECK (t.colour == 7);
 
     const auto usage = reopened.colourUsage();
@@ -137,6 +138,52 @@ TEST_CASE ("The library database stores tracks and their analysis", "[library][d
 
     reopened.removeTrack (id);
     CHECK (reopened.allTracks().empty());
+}
+
+TEST_CASE ("The library migrates a version 1 database", "[library][database]")
+{
+    TempDir dir;
+    const auto file = dir.path / "library.sqlite";
+    {
+        // The version 1 schema, with one analysed track.
+        SQLite::Database raw (pathToUtf8 (file), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+        raw.exec (R"sql(
+            CREATE TABLE tracks (
+                id              INTEGER PRIMARY KEY,
+                path            TEXT NOT NULL UNIQUE,
+                file_hash       TEXT NOT NULL DEFAULT '',
+                title           TEXT NOT NULL DEFAULT '',
+                artist          TEXT NOT NULL DEFAULT '',
+                colour          INTEGER NOT NULL DEFAULT 0,
+                status          TEXT NOT NULL DEFAULT 'pending',
+                error           TEXT NOT NULL DEFAULT '',
+                bpm             REAL,
+                key_name        TEXT NOT NULL DEFAULT '',
+                camelot         TEXT NOT NULL DEFAULT '',
+                duration_sec    REAL,
+                beat_confidence REAL,
+                analysis_file   TEXT NOT NULL DEFAULT '',
+                added_at        TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX tracks_by_hash ON tracks (file_hash);
+            INSERT INTO tracks (path, title, status, bpm, analysis_file) VALUES ('/music/a.flac', 'A', 'ready', 128, '/cache/a.json');
+            PRAGMA user_version = 1;
+        )sql");
+    }
+
+    LibraryDatabase db (file);
+    const auto tracks = db.allTracks();
+    REQUIRE (tracks.size() == 1);
+    CHECK (tracks[0].title == "A");
+    CHECK (tracks[0].status == AnalysisStatus::ready);
+    CHECK (*tracks[0].bpm == Catch::Approx (128.0));
+    CHECK (tracks[0].analyzerVersion.empty());
+
+    db.setAnalysis (tracks[0].id, { "sha256:a", 128.0, "", "", 1.0, 0.9, "/cache/a.json", "0.1.2" });
+    CHECK (db.track (tracks[0].id)->analyzerVersion == "0.1.2");
+
+    SQLite::Database raw (pathToUtf8 (file), SQLite::OPEN_READONLY);
+    CHECK (raw.execAndGet ("PRAGMA user_version").getInt() == LibraryDatabase::schemaVersion);
 }
 
 TEST_CASE ("The library refuses a database from a newer app", "[library][database]")

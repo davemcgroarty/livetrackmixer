@@ -45,3 +45,12 @@ TEST_CASE ("Analyzer arguments", "[analyzer][protocol]")
     CHECK (args[0] == "analyze");
     CHECK (args[2] == "--out");
 }
+
+TEST_CASE ("Analyzer versions parse from --version output", "[analyzer][protocol]")
+{
+    CHECK (djmix::parseAnalyzerVersion ("djanalyze 0.1.2") == "0.1.2");
+    CHECK (djmix::parseAnalyzerVersion ("djanalyze 1.0.0\r\n") == "1.0.0");
+    CHECK_FALSE (djmix::parseAnalyzerVersion ("Python 3.12.1"));
+    CHECK_FALSE (djmix::parseAnalyzerVersion ("djanalyze "));
+    CHECK_FALSE (djmix::parseAnalyzerVersion (""));
+}

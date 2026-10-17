@@ -39,6 +39,19 @@ std::vector<std::string> analyzerArguments (const std::filesystem::path& audioFi
     return { "analyze", pathToUtf8 (audioFile), "--out", pathToUtf8 (cacheDir) };
 }
 
+std::optional<std::string> parseAnalyzerVersion (std::string_view output)
+{
+    constexpr std::string_view prefix = "djanalyze ";
+    if (output.substr (0, prefix.size()) != prefix)
+        return std::nullopt;
+    auto version = output.substr (prefix.size());
+    const auto end = version.find_first_of (" \t\r\n");
+    version = version.substr (0, end);
+    if (version.empty())
+        return std::nullopt;
+    return std::string (version);
+}
+
 std::optional<std::filesystem::path> findOnPath (std::string_view name)
 {
     namespace fs = std::filesystem;

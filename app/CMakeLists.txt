@@ -20,6 +20,12 @@ add_library(djmix_core STATIC
     Source/library/LibraryFilter.cpp
     Source/library/TrackColours.h
     Source/library/TrackColours.cpp
+    Source/view/TrackStructure.h
+    Source/view/TrackStructure.cpp
+    Source/view/ViewRange.h
+    Source/view/ViewRange.cpp
+    Source/view/WaveformPyramid.h
+    Source/view/WaveformPyramid.cpp
 )
 target_include_directories(djmix_core PUBLIC Source)
 target_link_libraries(djmix_core PUBLIC nlohmann_json::nlohmann_json PRIVATE SQLiteCpp)
@@ -44,6 +50,13 @@ set(DJMIX_SERVICE_SOURCES
 )
 set(DJMIX_SERVICE_SOURCES ${DJMIX_SERVICE_SOURCES} PARENT_SCOPE) # for app/Tests
 
+# UI components the app tests draw into images.
+set(DJMIX_VIEW_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TrackView.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TrackView.cpp
+)
+set(DJMIX_VIEW_SOURCES ${DJMIX_VIEW_SOURCES} PARENT_SCOPE)
+
 juce_add_gui_app(DJMixer
     PRODUCT_NAME "DJ Mixer"
     COMPANY_NAME "livetrackmixer"
@@ -53,6 +66,7 @@ juce_add_gui_app(DJMixer
 
 target_sources(DJMixer PRIVATE
     ${DJMIX_SERVICE_SOURCES}
+    ${DJMIX_VIEW_SOURCES}
     Source/Main.cpp
     Source/AppSettings.h
     Source/AppSettings.cpp

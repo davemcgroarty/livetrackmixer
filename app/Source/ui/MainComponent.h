@@ -4,22 +4,27 @@
 
 #include "AppSettings.h"
 #include "LibraryPanel.h"
+#include "TrackView.h"
 #include "library/LibraryController.h"
 
 namespace djmix
 {
 
 // Top-level window content: the Library on the left, the Track view on top
-// and the Arrangement below. Track view and Arrangement arrive in M2b and M4.
-class MainComponent final : public juce::Component
+// and the Arrangement below. The Arrangement arrives in M4.
+class MainComponent final : public juce::Component,
+                            private juce::ChangeListener
 {
 public:
     MainComponent (AppSettings& settings, LibraryController& controller);
+    ~MainComponent() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
     class Placeholder final : public juce::Component
     {
     public:
@@ -32,7 +37,8 @@ private:
     LibraryController& controller;
 
     LibraryPanel library;
-    Placeholder trackView { "Track view: select a track" };
+    TrackView trackView;
+    int64_t selectedTrack = 0;
     Placeholder arrangement { "Arrangement" };
     juce::StretchableLayoutManager layout;
     juce::StretchableLayoutResizerBar divider { &layout, 1, true };

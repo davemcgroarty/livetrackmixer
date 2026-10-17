@@ -3,6 +3,7 @@
 #include "ImportScanner.h"
 #include "TrackColours.h"
 #include "analysis/AnalysisLoader.h"
+#include "analysis/AnalyzerProtocol.h"
 #include "analysis/AnalyzerRunner.h"
 
 namespace djmix
@@ -23,7 +24,19 @@ std::optional<AnalysisSummary> summarise (const std::filesystem::path& json, std
 
     const auto& analysis = std::get<TrackAnalysis> (result);
     return AnalysisSummary { analysis.fileHash,      analysis.bpm,         analysis.key.name, analysis.key.camelot,
-                             analysis.durationSec, analysis.beatConfidence, json };
+                             analysis.durationSec, analysis.beatConfidence, json,
+                             analysis.analyzerVersion };
+}
+
+// Runs `action` on the message thread if the controller still exists then.
+template <typename Action>
+void post (const std::weak_ptr<LibraryController*>& weak, Action action)
+{
+    juce::MessageManager::callAsync ([weak, action = std::move (action)]
+    {
+        if (auto self = weak.lock())
+            action (**self);
+    });
 }
 } // namespace
 
@@ -37,31 +50,21 @@ LibraryController::LibraryController (std::unique_ptr<LibraryDatabase> db,
 {
     std::weak_ptr<LibraryController*> weak = alive;
 
-    // Runner callbacks arrive on worker threads; hop to the message thread and
-    // only touch the controller if it still exists.
-    auto post = [weak] (auto action)
-    {
-        juce::MessageManager::callAsync ([weak, action = std::move (action)]
-        {
-            if (auto self = weak.lock())
-                action (**self);
-        });
-    };
-
+    // Runner callbacks arrive on worker threads; hop to the message thread.
     AnalyzerRunner::Callbacks callbacks;
-    callbacks.onProgress = [post] (int64_t id, double fraction, const std::string&)
+    callbacks.onProgress = [weak] (int64_t id, double fraction, const std::string&)
     {
-        post ([id, fraction] (LibraryController& c) { c.handleProgress (id, fraction); });
+        post (weak, [id, fraction] (LibraryController& c) { c.handleProgress (id, fraction); });
     };
-    callbacks.onFinished = [post] (int64_t id, const std::filesystem::path& json)
+    callbacks.onFinished = [weak] (int64_t id, const std::filesystem::path& json)
     {
         std::string error;
         auto summary = summarise (json, error);
-        post ([id, summary, error] (LibraryController& c) { c.handleFinished (id, summary, error); });
+        post (weak, [id, summary, error] (LibraryController& c) { c.handleFinished (id, summary, error); });
     };
-    callbacks.onFailed = [post] (int64_t id, const std::string& message)
+    callbacks.onFailed = [weak] (int64_t id, const std::string& message)
     {
-        post ([id, message] (LibraryController& c) { c.handleFinished (id, std::nullopt, message); });
+        post (weak, [id, message] (LibraryController& c) { c.handleFinished (id, std::nullopt, message); });
     };
 
     runner = std::make_unique<AnalyzerRunner> (std::move (callbacks));
@@ -70,12 +73,15 @@ LibraryController::LibraryController (std::unique_ptr<LibraryDatabase> db,
 
     reload();
     resumeUnfinished();
+    probeAnalyzerVersion();
 }
 
 LibraryController::~LibraryController()
 {
     alive.reset();
     runner.reset(); // kills running analyzers and joins the workers
+    for (auto& probe : probes)
+        probe.join();
 }
 
 const TrackRecord* LibraryController::findTrack (int64_t id) const
@@ -146,6 +152,9 @@ void LibraryController::setAnalyzerExecutable (const std::filesystem::path& exec
         if (track.status == AnalysisStatus::failed)
             queueAnalysis (track);
     reload();
+
+    currentAnalyzerVersion.clear();
+    probeAnalyzerVersion();
 }
 
 void LibraryController::reload()
@@ -172,6 +181,40 @@ void LibraryController::resumeUnfinished()
             queueAnalysis (track);
     }
     reload();
+}
+
+void LibraryController::probeAnalyzerVersion()
+{
+    if (analyzer.empty())
+        return;
+
+    const int generation = ++probeGeneration;
+    probes.emplace_back ([weak = std::weak_ptr<LibraryController*> (alive), exe = analyzer, generation]
+    {
+        const auto output = AnalyzerRunner::probeVersion (exe);
+        const auto version = output ? parseAnalyzerVersion (*output) : std::nullopt;
+        if (version)
+            post (weak, [generation, v = *version] (LibraryController& c) { c.handleAnalyzerVersion (generation, v); });
+    });
+}
+
+void LibraryController::handleAnalyzerVersion (int generation, const std::string& version)
+{
+    if (generation != probeGeneration)
+        return; // the analyzer was changed while this one was asked
+
+    currentAnalyzerVersion = version;
+    bool queued = false;
+    for (const auto& track : trackList)
+    {
+        if (track.status == AnalysisStatus::ready && track.analyzerVersion != version)
+        {
+            queueAnalysis (track);
+            queued = true;
+        }
+    }
+    if (queued)
+        reload();
 }
 
 void LibraryController::handleProgress (int64_t id, double fraction)

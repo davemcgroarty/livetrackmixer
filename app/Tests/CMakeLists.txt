@@ -8,6 +8,7 @@ add_executable(djmix_tests
     LibraryTests.cpp
     WaveformFileTests.cpp
     RealtimeGuardTests.cpp
+    ViewTests.cpp
     TestPaths.h
 )
 
@@ -34,16 +35,19 @@ add_executable(fake_djanalyze FakeAnalyzer.cpp)
 target_compile_features(fake_djanalyze PRIVATE cxx_std_20)
 target_compile_definitions(fake_djanalyze PRIVATE DJMIX_REPO_ROOT="${PROJECT_SOURCE_DIR}")
 
-# Tests for the non-UI code that uses JUCE (the analyzer runner).
+# Tests for the code that uses JUCE: the analyzer runner, and views drawn
+# into images (no window needed).
 juce_add_console_app(djmix_app_tests PRODUCT_NAME "djmix_app_tests")
 target_sources(djmix_app_tests PRIVATE
     ${DJMIX_SERVICE_SOURCES}
+    ${DJMIX_VIEW_SOURCES}
     AnalyzerRunnerTests.cpp
+    TrackViewTests.cpp
 )
 target_include_directories(djmix_app_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(djmix_app_tests PRIVATE
     djmix_core
-    juce::juce_core
+    juce::juce_gui_basics
     Catch2::Catch2WithMain
 )
 target_compile_definitions(djmix_app_tests PRIVATE

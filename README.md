@@ -21,7 +21,8 @@ validate against it.
 | M0 · Skeleton: CMake + JUCE window, installable analyzer, CI | Done |
 | M1 · Analyzer CLI: schema-valid JSON and `.wfm`, cached by hash | Done (see notes below) |
 | M2a · Library: import, background analysis, track table | Done |
-| M2b · Track view, M2c · Audition | Next |
+| M2b · Track view: waveform, beat/bar/phrase grid, sections, content cells | Done |
+| M2c · Audition on Cue | Next |
 | M3–M6 | Not started |
 
 On the synthetic test clips, BPM is within ±0.02 and downbeats are within 13 ms
@@ -83,6 +84,24 @@ its colour, analyse it again, show the file or remove it from the library
 (the file itself is never touched). Tracks with an uncertain beat grid show
 **Check beats**; hover over a status for details.
 
+Select a track to see it in the **Track view**: the waveform over its beat
+grid, with bar lines, heavier phrase lines (every 8 bars) and section
+boundaries, and a strip of sections above. Each bar is a cell in the track's
+colour: the block rising from the bottom is its bass, the block hanging from
+the top its high end, and the waveform is brighter where the rhythm is
+stronger. Hover over a bar, or a section in the strip, to see its bass, high,
+rhythm and melody scores.
+
+Zoom with the mouse wheel or a pinch (around the pointer), from the whole
+track down to two beats; scroll with shift-wheel, a sideways swipe, the scroll
+bar or by dragging. **+** and **-** zoom, **Home** shows the whole track, and
+double-clicking toggles between the whole track and the phrase under the
+pointer.
+
+When the app finds a newer (or different) `djanalyze` than the one that
+analysed a track, it analyses the track again in the background; the old
+analysis stays on screen until the new one is ready.
+
 Titles and artists come from file names (`Artist - Title.ext`, with any leading
 track number dropped); reading tags is a later step. The library is a SQLite
 file in the app's data folder (**Settings...** shows where), next to the
@@ -103,6 +122,10 @@ same directory:
 DJMIX_ANALYZER_OUTPUT=/tmp/analysis python -m pytest analyzer
 DJMIX_ANALYZER_OUTPUT=/tmp/analysis ctest --test-dir build
 ```
+
+The Track view tests draw a six-minute track into an image at four zoom levels
+and print the time per frame (a few milliseconds in a Release build). Set
+`DJMIX_SNAPSHOT_DIR` to a folder to also save the images there.
 
 The analyzer runner is tested against `fake_djanalyze`, a small stand-in built
 with the tests. Set `DJMIX_DJANALYZE` to a real `djanalyze` to also run it

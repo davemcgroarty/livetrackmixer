@@ -42,6 +42,7 @@ struct TrackRecord
     std::optional<double> durationSec;
     std::optional<double> beatConfidence;
     std::filesystem::path analysisFile;
+    std::string analyzerVersion; // of the djanalyze that wrote analysisFile; empty if not known
 };
 
 struct AnalysisSummary
@@ -53,6 +54,7 @@ struct AnalysisSummary
     double durationSec = 0.0;
     double beatConfidence = 0.0;
     std::filesystem::path analysisFile;
+    std::string analyzerVersion;
 };
 
 // The SQLite track library. Not thread-safe: use it from one thread (the
@@ -60,7 +62,7 @@ struct AnalysisSummary
 class LibraryDatabase
 {
 public:
-    static constexpr int schemaVersion = 1;
+    static constexpr int schemaVersion = 2;
 
     // Opens or creates the library at `file`, migrating older schemas.
     explicit LibraryDatabase (const std::filesystem::path& file);

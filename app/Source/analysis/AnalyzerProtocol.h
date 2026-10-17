@@ -34,6 +34,10 @@ std::optional<AnalyzerEvent> parseAnalyzerLine (std::string_view line);
 std::vector<std::string> analyzerArguments (const std::filesystem::path& audioFile,
                                             const std::filesystem::path& cacheDir);
 
+// The version number from `djanalyze --version` output ("djanalyze 0.1.2"),
+// or nothing if the output is not from djanalyze.
+std::optional<std::string> parseAnalyzerVersion (std::string_view versionOutput);
+
 // The first executable called `name` on PATH (trying PATHEXT on Windows).
 std::optional<std::filesystem::path> findOnPath (std::string_view name);
 

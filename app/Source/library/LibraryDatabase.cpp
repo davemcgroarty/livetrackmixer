@@ -30,12 +30,13 @@ TrackRecord readRecord (SQLite::Statement& row)
     if (! row.getColumn ("beat_confidence").isNull())
         t.beatConfidence = row.getColumn ("beat_confidence").getDouble();
     t.analysisFile = pathFromUtf8 (row.getColumn ("analysis_file").getString());
+    t.analyzerVersion = row.getColumn ("analyzer_version").getString();
     return t;
 }
 
 constexpr const char* selectColumns =
     "SELECT id, path, file_hash, title, artist, colour, status, error, bpm, key_name, camelot, "
-    "duration_sec, beat_confidence, analysis_file FROM tracks";
+    "duration_sec, beat_confidence, analysis_file, analyzer_version FROM tracks";
 } // namespace
 
 std::string pathToUtf8 (const std::filesystem::path& path)
@@ -112,6 +113,12 @@ void LibraryDatabase::migrate()
             CREATE INDEX tracks_by_hash ON tracks (file_hash);
         )sql");
     }
+    if (version < 2)
+    {
+        // Lets the app spot analyses written by an older djanalyze. Rows from
+        // version 1 read as unknown, so they are checked once more.
+        db->exec ("ALTER TABLE tracks ADD COLUMN analyzer_version TEXT NOT NULL DEFAULT ''");
+    }
     db->exec ("PRAGMA user_version = " + std::to_string (schemaVersion));
     transaction.commit();
 }
@@ -170,7 +177,7 @@ void LibraryDatabase::setAnalysis (int64_t id, const AnalysisSummary& s)
 {
     SQLite::Statement update (*db, R"sql(
         UPDATE tracks SET status = 'ready', error = '', file_hash = ?, bpm = ?, key_name = ?, camelot = ?,
-                          duration_sec = ?, beat_confidence = ?, analysis_file = ?
+                          duration_sec = ?, beat_confidence = ?, analysis_file = ?, analyzer_version = ?
         WHERE id = ?)sql");
     update.bind (1, s.fileHash);
     update.bind (2, s.bpm);
@@ -179,7 +186,8 @@ void LibraryDatabase::setAnalysis (int64_t id, const AnalysisSummary& s)
     update.bind (5, s.durationSec);
     update.bind (6, s.beatConfidence);
     update.bind (7, pathToUtf8 (s.analysisFile));
-    update.bind (8, id);
+    update.bind (8, s.analyzerVersion);
+    update.bind (9, id);
     update.exec();
 }
 

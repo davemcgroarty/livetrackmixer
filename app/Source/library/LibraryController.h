@@ -4,6 +4,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
+#include <thread>
 #include <vector>
 
 #include <juce_events/juce_events.h>
@@ -43,10 +45,19 @@ public:
     const std::filesystem::path& analyzerExecutable() const { return analyzer; }
     const std::filesystem::path& cacheDirectory() const { return cacheDir; }
 
+    // The version of the analyzer set up now ("0.1.2"), once it has been asked;
+    // empty before that or if it did not answer.
+    const std::string& analyzerVersion() const { return currentAnalyzerVersion; }
+
 private:
     void reload();
     void queueAnalysis (const TrackRecord& track);
     void resumeUnfinished();
+
+    // Asks the analyzer for its version on a background thread, then
+    // re-analyses tracks whose analysis an older (or newer) version wrote.
+    void probeAnalyzerVersion();
+    void handleAnalyzerVersion (int generation, const std::string& version);
 
     void handleProgress (int64_t id, double progress);
     void handleFinished (int64_t id, std::optional<AnalysisSummary> summary, const std::string& error);
@@ -56,6 +67,9 @@ private:
     std::filesystem::path cacheDir;
     std::vector<TrackRecord> trackList;
     std::map<int64_t, double> progress;
+    std::string currentAnalyzerVersion;
+    int probeGeneration = 0;
+    std::vector<std::thread> probes; // joined on destruction
 
     // Cleared on destruction so callbacks still in flight from the runner's
     // threads find no controller to post to.

@@ -16,17 +16,28 @@ MainComponent::MainComponent (AppSettings& s, LibraryController& c)
     library.onOpenSettings = [this] { SettingsComponent::show (settings, controller); };
     library.onSelectionChanged = [this] (int64_t id)
     {
-        const auto* track = controller.findTrack (id);
-        trackView.text = track != nullptr ? "Track view: " + juce::String::fromUTF8 (track->title.c_str())
-                                          : "Track view: select a track";
-        trackView.repaint();
+        selectedTrack = id;
+        trackView.showTrack (controller.findTrack (id));
     };
+    controller.addChangeListener (this);
 
     layout.setItemLayout (0, 360, -0.8, -0.42); // library
     layout.setItemLayout (1, 6, 6, 6);          // divider
     layout.setItemLayout (2, 300, -1.0, -0.58); // track view and arrangement
 
     setSize (1280, 800);
+}
+
+MainComponent::~MainComponent()
+{
+    controller.removeChangeListener (this);
+}
+
+void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // The selected track may have finished (re-)analysis, changed colour or gone.
+    if (selectedTrack != 0)
+        trackView.showTrack (controller.findTrack (selectedTrack));
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -41,7 +52,7 @@ void MainComponent::resized()
     layout.layOutComponents (columns, 3, 0, 0, getWidth(), getHeight(), false, true);
 
     auto right = dummy.getBounds().reduced (6);
-    trackView.setBounds (right.removeFromTop (right.getHeight() * 2 / 5));
+    trackView.setBounds (right.removeFromTop (right.getHeight() / 2));
     right.removeFromTop (6);
     arrangement.setBounds (right);
 }
