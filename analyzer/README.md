@@ -4,8 +4,9 @@
 djanalyze analyze <audio-file> --out <cache-dir> [--stems] [--force] [--engine auto|builtin]
 ```
 
-Reads MP3, WAV, FLAC or AIFF (anything libsndfile decodes, with librosa's
-audioread as a fallback) and writes `<cache-dir>/sha256-<hex>.json`
+Reads WAV, FLAC, AIFF, MP3 and OGG through libsndfile. Other formats, such as
+M4A (AAC or ALAC), go through `ffmpeg` if it is on `PATH`; without it they fail
+with an error naming ffmpeg. Output goes to `<cache-dir>/sha256-<hex>.json`
 (schema: `schemas/analysis.v1.schema.json`) and `sha256-<hex>.wfm`
 (format: `docs/wfm-format.md`). The `.wfm` file is written first and the JSON
 last, both atomically, so a JSON file always has its waveform beside it.
@@ -66,5 +67,6 @@ the built-in engine and checks:
 - section boundaries, phrases and keys against how each clip was built
 - that descriptors rise and fall with the parts playing in each section
 - the CLI contract: output files, progress lines, caching, errors, the schema
+- AAC and ALAC files decoded through ffmpeg (skipped when ffmpeg is missing)
 
 Set `DJMIX_ANALYZER_OUTPUT` to keep the analysis files for the C++ tests.

@@ -19,6 +19,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: analyzer/pyproject.toml
+      - name: ffmpeg, for the M4A decoding tests
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install
         run: pip install -e "analyzer[dev]"
       - name: Test

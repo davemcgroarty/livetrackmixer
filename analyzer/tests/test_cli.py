@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 
 import jsonschema
+import numpy as np
 import pytest
+import soundfile
 
 import djanalyze
-from djanalyze import cli, pipeline, schema, waveform
+from djanalyze import audio, cli, pipeline, schema, waveform
+from djanalyze.progress import Progress
 from conftest import REPO
 
 
@@ -124,3 +129,33 @@ def test_schema_contract(analysed):
     labelled["sections"][0]["label"] = "chorus"
     with pytest.raises(jsonschema.ValidationError):
         schema.validate(labelled)
+
+
+needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not installed")
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("codec, extension", [("aac", "m4a"), ("alac", "m4a")])
+def test_formats_libsndfile_cannot_read_go_through_ffmpeg(clips, tmp_path, codec, extension):
+    reference = min(clips, key=lambda c: c.total_bars)
+    converted = tmp_path / f"{reference.name}-{codec}.{extension}"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(reference.path), "-c:a", codec, str(converted)], check=True
+    )
+    with pytest.raises(soundfile.LibsndfileError):
+        soundfile.info(str(converted))
+
+    result = pipeline.analyze(converted, tmp_path / "cache", pipeline.Options(engine="builtin"), Progress(io.StringIO()))
+    document = json.loads(result.json_path.read_text())
+    assert document["tempo"]["bpm"] == pytest.approx(reference.bpm, abs=0.5)
+    found = np.array(document["downbeats"])
+    misses = np.abs(np.array(reference.downbeats)[:, None] - found[None, :]).min(axis=1)
+    assert misses.max() <= 0.030
+
+
+def test_unreadable_format_without_ffmpeg_names_ffmpeg(tmp_path, monkeypatch):
+    fake = tmp_path / "track.m4a"
+    fake.write_bytes(b"\x00\x00\x00\x20ftypM4A " + bytes(64))
+    monkeypatch.setattr(audio.shutil, "which", lambda _: None)
+    with pytest.raises(ValueError, match="ffmpeg"):
+        audio.decode(fake)

@@ -34,6 +34,9 @@ djanalyze analyze track.flac --out ~/.cache/djmixer/analysis
 python -m pytest analyzer
 ```
 
+It reads WAV, FLAC, AIFF, MP3 and OGG directly, and M4A (AAC or ALAC) and
+other formats when `ffmpeg` is installed.
+
 `djanalyze` prints one JSON progress line per stage on stdout, for example
 `{"stage": "beats", "progress": 0.4}`, then `{"stage": "done", ...}` or
 `{"stage": "error", "message": ...}`. Output files are named after the
