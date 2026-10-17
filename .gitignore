@@ -1,0 +1,20 @@
+# Build output
+/build*/
+/out/
+.cache/
+compile_commands.json
+
+# Python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Rendered test clips (generate.py writes here by default)
+/test-audio/clips/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store

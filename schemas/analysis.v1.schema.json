@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/davemcgroarty/livetrackmixer/schemas/analysis.v1.schema.json",
+  "title": "Track analysis (schema v1)",
+  "description": "Written by djanalyze, read by the app. All positions are seconds from the file start. Beat indices are 0-based; bar, phrase and section-bar numbers are 1-based. Sections carry no labels. User corrections are never written into this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "analyzerVersion",
+    "file",
+    "tempo",
+    "key",
+    "loudness",
+    "beats",
+    "downbeats",
+    "bars",
+    "phrases",
+    "sections",
+    "energyPerBar",
+    "descriptors",
+    "confidence",
+    "waveformFile",
+    "stems"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "analyzerVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.+-].*)?$"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "durationSec", "sampleRate"],
+      "properties": {
+        "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "sampleRate": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "tempo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bpm", "variable"],
+      "properties": {
+        "bpm": { "type": "number", "exclusiveMinimum": 0 },
+        "variable": { "type": "boolean" }
+      }
+    },
+    "key": { "$ref": "#/$defs/key" },
+    "loudness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integratedLufs"],
+      "properties": {
+        "integratedLufs": { "type": ["number", "null"] }
+      }
+    },
+    "beats": { "$ref": "#/$defs/times" },
+    "downbeats": { "$ref": "#/$defs/times" },
+    "bars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "start", "firstBeat"],
+        "properties": {
+          "n": { "type": "integer", "minimum": 1 },
+          "start": { "$ref": "#/$defs/seconds" },
+          "firstBeat": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "phrases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "startBar", "lengthBars", "section"],
+        "properties": {
+          "n": { "type": "integer", "minimum": 1 },
+          "startBar": { "type": "integer", "minimum": 1 },
+          "lengthBars": { "type": "integer", "minimum": 1 },
+          "section": { "type": "integer", "minimum": 0, "description": "0-based index into sections" }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start", "end", "startBar", "lengthBars", "key"],
+        "properties": {
+          "start": { "$ref": "#/$defs/seconds" },
+          "end": { "$ref": "#/$defs/seconds" },
+          "startBar": { "type": "integer", "minimum": 1 },
+          "lengthBars": { "type": "integer", "minimum": 1 },
+          "key": {
+            "description": "null when the section has no reliable key (for example a drums-only intro).",
+            "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sectionKey" }]
+          }
+        }
+      }
+    },
+    "energyPerBar": { "$ref": "#/$defs/unitArray" },
+    "descriptors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["perBar", "perSection"],
+      "properties": {
+        "perBar": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rhythm", "bass", "high", "melody"],
+          "properties": {
+            "rhythm": { "$ref": "#/$defs/unitArray" },
+            "bass": { "$ref": "#/$defs/unitArray" },
+            "high": { "$ref": "#/$defs/unitArray" },
+            "melody": { "$ref": "#/$defs/unitArray" },
+            "raw": {
+              "description": "Unnormalised values behind the scores, one entry per bar.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "rhythmOnsetStrength": { "type": "array", "items": { "type": "number" } },
+                "rhythmRegularity": { "type": "array", "items": { "type": "number" } },
+                "bassDb": { "type": "array", "items": { "type": "number" } },
+                "highDb": { "type": "array", "items": { "type": "number" } },
+                "melodyDb": { "type": "array", "items": { "type": "number" } },
+                "melodySalience": { "type": "array", "items": { "type": "number" } }
+              }
+            }
+          }
+        },
+        "perSection": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["section", "rhythm", "bass", "high", "melody"],
+            "properties": {
+              "section": { "type": "integer", "minimum": 0 },
+              "rhythm": { "$ref": "#/$defs/unit" },
+              "bass": { "$ref": "#/$defs/unit" },
+              "high": { "$ref": "#/$defs/unit" },
+              "melody": { "$ref": "#/$defs/unit" }
+            }
+          }
+        }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["beats", "sections"],
+      "properties": {
+        "beats": { "$ref": "#/$defs/unit" },
+        "sections": { "$ref": "#/$defs/unit" }
+      }
+    },
+    "waveformFile": {
+      "type": "string",
+      "description": "File name of the .wfm waveform overview, relative to the JSON file.",
+      "pattern": "^[^/\\\\]+\\.wfm$"
+    },
+    "stems": {
+      "description": "null until stem separation runs (v1.1).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "seconds": { "type": "number", "minimum": 0 },
+    "times": { "type": "array", "items": { "$ref": "#/$defs/seconds" } },
+    "unit": { "type": "number", "minimum": 0, "maximum": 1 },
+    "unitArray": { "type": "array", "items": { "$ref": "#/$defs/unit" } },
+    "camelot": { "type": "string", "pattern": "^(1[0-2]|[1-9])[AB]$" },
+    "key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "camelot", "confidence"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-G](#|b)? (major|minor)$"
+        },
+        "camelot": { "$ref": "#/$defs/camelot" },
+        "confidence": { "$ref": "#/$defs/unit" }
+      }
+    },
+    "sectionKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["camelot", "confidence"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-G](#|b)? (major|minor)$"
+        },
+        "camelot": { "$ref": "#/$defs/camelot" },
+        "confidence": { "$ref": "#/$defs/unit" }
+      }
+    }
+  }
+}

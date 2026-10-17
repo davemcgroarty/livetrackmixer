@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "analyzerVersion": "0.1.0",
+  "file": {
+    "hash": "sha256:9f2c1b7e4d0a5c3e8b6f1a2d7c4e9b0a3f5d8c1e6b2a7f4d9c0e3b8a5f1d6c2e",
+    "durationSec": 4.6,
+    "sampleRate": 44100
+  },
+  "tempo": { "bpm": 120.0, "variable": false },
+  "key": { "name": "A minor", "camelot": "8A", "confidence": 0.82 },
+  "loudness": { "integratedLufs": -8.1 },
+  "beats": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+  "downbeats": [0.5, 2.5],
+  "bars": [
+    { "n": 1, "start": 0.5, "firstBeat": 0 },
+    { "n": 2, "start": 2.5, "firstBeat": 4 }
+  ],
+  "phrases": [{ "n": 1, "startBar": 1, "lengthBars": 2, "section": 0 }],
+  "sections": [
+    {
+      "start": 0.5,
+      "end": 4.5,
+      "startBar": 1,
+      "lengthBars": 2,
+      "key": { "camelot": "8A", "confidence": 0.77 }
+    }
+  ],
+  "energyPerBar": [0.21, 0.24],
+  "descriptors": {
+    "perBar": {
+      "rhythm": [0.12, 0.15],
+      "bass": [0.05, 0.08],
+      "high": [0.4, 0.42],
+      "melody": [0.66, 0.7]
+    },
+    "perSection": [{ "section": 0, "rhythm": 0.135, "bass": 0.065, "high": 0.41, "melody": 0.68 }]
+  },
+  "confidence": { "beats": 0.93, "sections": 0.71 },
+  "waveformFile": "sha256-9f2c1b7e4d0a5c3e8b6f1a2d7c4e9b0a3f5d8c1e6b2a7f4d9c0e3b8a5f1d6c2e.wfm",
+  "stems": null
+}
