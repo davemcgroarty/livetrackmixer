@@ -8,6 +8,16 @@ CPMAddPackage(
     OPTIONS "JSON_BuildTests OFF" "JSON_Install OFF"
 )
 
+# Track library database. SQLiteCpp bundles the SQLite amalgamation (public domain).
+CPMAddPackage(
+    NAME SQLiteCpp
+    GITHUB_REPOSITORY SRombauts/SQLiteCpp
+    GIT_TAG 3.4.0
+    VERSION 3.4.0
+    OPTIONS "SQLITECPP_RUN_CPPLINT OFF" "SQLITECPP_RUN_CPPCHECK OFF" "SQLITECPP_BUILD_EXAMPLES OFF"
+            "SQLITECPP_BUILD_TESTS OFF" "SQLITECPP_INTERNAL_SQLITE ON"
+)
+
 if(DJMIX_BUILD_APP)
     # JUCE 9 under AGPLv3 (free tier).
     CPMAddPackage(

@@ -58,6 +58,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libxi-dev libxcomposite-dev libxrender-dev libgl-dev
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: analyzer/pyproject.toml
+      - name: Install the analyzer, for the runner integration test
+        shell: bash
+        run: |
+          pip install -e analyzer
+          echo "DJMIX_DJANALYZE=$(python -c 'import shutil; print(shutil.which("djanalyze"))')" >> "$GITHUB_ENV"
       - name: Analysis output from the analyzer job
         uses: actions/download-artifact@v4
         with:

@@ -6,11 +6,23 @@ add_library(djmix_core STATIC
     Source/analysis/AnalysisLoader.cpp
     Source/analysis/WaveformFile.h
     Source/analysis/WaveformFile.cpp
+    Source/analysis/AnalyzerProtocol.h
+    Source/analysis/AnalyzerProtocol.cpp
     Source/engine/RealtimeGuard.h
     Source/engine/RealtimeGuard.cpp
+    Source/library/Camelot.h
+    Source/library/Camelot.cpp
+    Source/library/ImportScanner.h
+    Source/library/ImportScanner.cpp
+    Source/library/LibraryDatabase.h
+    Source/library/LibraryDatabase.cpp
+    Source/library/LibraryFilter.h
+    Source/library/LibraryFilter.cpp
+    Source/library/TrackColours.h
+    Source/library/TrackColours.cpp
 )
 target_include_directories(djmix_core PUBLIC Source)
-target_link_libraries(djmix_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(djmix_core PUBLIC nlohmann_json::nlohmann_json PRIVATE SQLiteCpp)
 target_compile_features(djmix_core PUBLIC cxx_std_20)
 
 if(MSVC)
@@ -23,6 +35,15 @@ if(NOT DJMIX_BUILD_APP)
     return()
 endif()
 
+# Non-UI code that needs JUCE (juce_core). JUCE modules compile into each
+# target that links them, so these sources go into the app and the app tests
+# directly rather than into a shared library.
+set(DJMIX_SERVICE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.cpp
+)
+set(DJMIX_SERVICE_SOURCES ${DJMIX_SERVICE_SOURCES} PARENT_SCOPE) # for app/Tests
+
 juce_add_gui_app(DJMixer
     PRODUCT_NAME "DJ Mixer"
     COMPANY_NAME "livetrackmixer"
@@ -31,9 +52,18 @@ juce_add_gui_app(DJMixer
 )
 
 target_sources(DJMixer PRIVATE
+    ${DJMIX_SERVICE_SOURCES}
     Source/Main.cpp
+    Source/AppSettings.h
+    Source/AppSettings.cpp
+    Source/library/LibraryController.h
+    Source/library/LibraryController.cpp
+    Source/ui/LibraryPanel.h
+    Source/ui/LibraryPanel.cpp
     Source/ui/MainComponent.h
     Source/ui/MainComponent.cpp
+    Source/ui/SettingsComponent.h
+    Source/ui/SettingsComponent.cpp
 )
 
 target_compile_definitions(DJMixer PRIVATE
@@ -48,6 +78,7 @@ target_link_libraries(DJMixer
     PRIVATE
         djmix_core
         juce::juce_audio_utils
+        juce::juce_data_structures
         juce::juce_audio_formats
         juce::juce_dsp
         juce::juce_gui_extra

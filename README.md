@@ -20,7 +20,9 @@ validate against it.
 | --- | --- |
 | M0 · Skeleton: CMake + JUCE window, installable analyzer, CI | Done |
 | M1 · Analyzer CLI: schema-valid JSON and `.wfm`, cached by hash | Done (see notes below) |
-| M2–M6 | Not started |
+| M2a · Library: import, background analysis, track table | Done |
+| M2b · Track view, M2c · Audition | Next |
+| M3–M6 | Not started |
 
 On the synthetic test clips, BPM is within ±0.02 and downbeats are within 13 ms
 of the reference. The M1 targets are ±0.5 BPM and 30 ms.
@@ -60,7 +62,33 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-CPM.cmake fetches JUCE, nlohmann/json, Catch2 and json-schema-validator at
+Run the app from `build/app/DJMixer_artefacts/` (on macOS, `DJ Mixer.app`).
+
+### Using the app
+
+1. Open **Settings...** and point the app at `djanalyze`: in the virtual
+   environment from the Analyzer section that is `.venv\Scripts\djanalyze.exe`
+   on Windows and `.venv/bin/djanalyze` elsewhere. **Test** checks it runs.
+   If `djanalyze` is on `PATH` when the app starts, it is found automatically.
+2. Drag audio files or folders onto the Library, or use **Add...**. Folders are
+   searched recursively. Files named on the command line are imported too.
+3. Each new track is queued and analysed in the background, two at a time,
+   with a progress bar in the Status column. Analysis results are cached by
+   file hash, so a track analysed before (or a copy of it) is ready at once.
+
+The table sorts by any column. Filter by a BPM range, or tick **Compatible
+keys** to show only tracks that mix well with the selected one (same key, ±1 on
+the Camelot wheel, or the relative major/minor). Right-click a track to change
+its colour, analyse it again, show the file or remove it from the library
+(the file itself is never touched). Tracks with an uncertain beat grid show
+**Check beats**; hover over a status for details.
+
+Titles and artists come from file names (`Artist - Title.ext`, with any leading
+track number dropped); reading tags is a later step. The library is a SQLite
+file in the app's data folder (**Settings...** shows where), next to the
+analysis cache.
+
+CPM.cmake fetches JUCE, SQLiteCpp, nlohmann/json, Catch2 and json-schema-validator at
 configure time. Set `CPM_SOURCE_CACHE=~/.cache/CPM` to reuse the downloads.
 Configure with `-DDJMIX_BUILD_APP=OFF` to build only the tests, without JUCE.
 
@@ -75,6 +103,10 @@ same directory:
 DJMIX_ANALYZER_OUTPUT=/tmp/analysis python -m pytest analyzer
 DJMIX_ANALYZER_OUTPUT=/tmp/analysis ctest --test-dir build
 ```
+
+The analyzer runner is tested against `fake_djanalyze`, a small stand-in built
+with the tests. Set `DJMIX_DJANALYZE` to a real `djanalyze` to also run it
+end to end.
 
 ## Licence
 
