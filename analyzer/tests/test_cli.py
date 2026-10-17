@@ -203,9 +203,10 @@ def test_long_tracks_analyse_in_bounded_memory(tmp_path):
         peaks[repeats], document = _analyse_and_measure(track, tmp_path / "cache")
 
     # The 4 extra minutes hold about 130 MB of decoded audio and per-frame
-    # features; whole-track spectrograms cost gigabytes.
+    # features. Linux reports growth of about 140 MB, macOS about 430 MB (its
+    # allocator keeps freed memory); whole-track spectrograms cost over 10 GB.
     growth = peaks[6] - peaks[2]
-    assert growth < 400, f"peak memory grew by {growth:.0f} MB ({peaks[2]:.0f} -> {peaks[6]:.0f} MB)"
+    assert growth < 800, f"peak memory grew by {growth:.0f} MB ({peaks[2]:.0f} -> {peaks[6]:.0f} MB)"
     assert peaks[6] < 2500, f"peak memory {peaks[6]:.0f} MB"
 
     # And the long track's analysis is right: constant tempo, sections on time.
