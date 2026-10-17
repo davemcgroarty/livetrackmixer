@@ -8,7 +8,7 @@ The repo has two parts that share only files on disk:
 
 - **`analyzer/`**: `djanalyze`, a Python command-line tool that turns one audio
   file into one analysis JSON file and one `.wfm` waveform file.
-- **`app/`**: the C++20 / JUCE 8 desktop app, which runs `djanalyze` as a
+- **`app/`**: the C++20 / JUCE 9 desktop app, which runs `djanalyze` as a
   subprocess and reads its output.
 
 `schemas/analysis.v1.schema.json` is the contract between them. Both test suites
@@ -62,7 +62,8 @@ configure time. Set `CPM_SOURCE_CACHE=~/.cache/CPM` to reuse the downloads.
 Configure with `-DDJMIX_BUILD_APP=OFF` to build only the tests, without JUCE.
 
 On Linux, JUCE needs `libasound2-dev libfreetype-dev libfontconfig1-dev
-libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libgl-dev`.
+libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libxi-dev
+libxcomposite-dev libxrender-dev libgl-dev`.
 
 To check real analyzer output from the C++ side, point both test suites at the
 same directory:

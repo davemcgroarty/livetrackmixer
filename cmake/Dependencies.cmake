@@ -9,12 +9,12 @@ CPMAddPackage(
 )
 
 if(DJMIX_BUILD_APP)
-    # JUCE 8 under AGPLv3 (free tier). JUCE 9 is also AGPLv3; moving to it is a one-line change here.
+    # JUCE 9 under AGPLv3 (free tier).
     CPMAddPackage(
         NAME JUCE
         GITHUB_REPOSITORY juce-framework/JUCE
-        GIT_TAG 8.0.16-security
-        VERSION 8.0.16
+        GIT_TAG 9.0.4
+        VERSION 9.0.4
         GIT_SHALLOW ON
     )
 endif()
