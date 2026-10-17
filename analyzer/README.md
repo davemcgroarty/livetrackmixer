@@ -36,6 +36,11 @@ Common to both engines:
 - **Phrases** are 8 bars, or 16 in sections of 32 bars or more that divide
   evenly. Every section boundary starts a phrase. The final phrase of a section
   can be shorter.
+- **Memory and speed.** Spectrograms are computed 20 seconds at a time and
+  reduced at once to the per-frame values later stages use, so memory does not
+  grow with track length: a 6-minute track peaks under 1 GB (much of it the
+  Python libraries themselves) and takes about a minute with the built-in
+  engine. Progress lines arrive throughout the long spectrum stage.
 - **Sections without a reliable key** (key confidence under 0.5 or melody
   score under 0.15) get `"key": null`.
 

@@ -17,6 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .features import chunked_stft
+
 BEATS_PER_BAR = 4
 MIN_BPM = 70.0
 MAX_BPM = 180.0
@@ -98,10 +100,17 @@ def estimate_beat_this(path: Path) -> BeatEstimate:
 # ------------------------------------------------------------- built-in backend
 
 
-def _onset_envelope(mono: np.ndarray, sr: int) -> np.ndarray:
+def onset_envelope(mono: np.ndarray, sr: int) -> np.ndarray:
+    """librosa's onset strength (128 mel bands, one value per ONSET_HOP), computed
+    in chunks so memory stays flat on long tracks."""
     import librosa
 
-    return librosa.onset.onset_strength(y=mono, sr=sr, hop_length=ONSET_HOP)
+    n_fft = 2048
+    mel_basis = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=128)
+    mel = chunked_stft(mono, n_fft, ONSET_HOP, lambda stft, keep: mel_basis @ (np.abs(stft[:, keep]) ** 2), sr=sr)
+    return librosa.onset.onset_strength(
+        S=librosa.power_to_db(mel, ref=np.max), sr=sr, hop_length=ONSET_HOP, n_fft=n_fft
+    )
 
 
 def _low_band_onsets(mono: np.ndarray, sr: int, cutoff: float = 150.0) -> np.ndarray:
@@ -109,24 +118,63 @@ def _low_band_onsets(mono: np.ndarray, sr: int, cutoff: float = 150.0) -> np.nda
     import librosa
 
     n_fft = 4096
-    spectrum = np.abs(librosa.stft(mono, n_fft=n_fft, hop_length=ONSET_HOP))
-    low = spectrum[librosa.fft_frequencies(sr=sr, n_fft=n_fft) < cutoff]
+    low_bins = librosa.fft_frequencies(sr=sr, n_fft=n_fft) < cutoff
+    low = chunked_stft(mono, n_fft, ONSET_HOP, lambda stft, keep: np.abs(stft[low_bins, keep]), sr=sr)
     flux = np.maximum(0.0, np.diff(np.log1p(100.0 * low), axis=1)).sum(axis=0)
     return np.concatenate([[0.0], flux])
 
 
-def estimate_builtin(mono: np.ndarray, sr: int) -> BeatEstimate:
-    """librosa beat tracking plus a downbeat-phase heuristic."""
+def estimate_builtin(mono: np.ndarray, sr: int, envelope: np.ndarray, chroma: np.ndarray, chroma_hop: int) -> BeatEstimate:
+    """librosa beat tracking plus a downbeat-phase heuristic.
+
+    `envelope` is onset_envelope(mono, sr); `chroma` is a 12 × frames chroma of
+    the track with `chroma_hop` samples per frame.
+    """
     import librosa
 
-    envelope = _onset_envelope(mono, sr)
+    # Passing the tempo in skips librosa's own estimate, which builds an
+    # 8-second autocorrelation for every frame: gigabytes on a long track.
     _, frames = librosa.beat.beat_track(
-        onset_envelope=envelope, sr=sr, hop_length=ONSET_HOP, start_bpm=120.0, tightness=100, trim=False
+        onset_envelope=envelope, sr=sr, hop_length=ONSET_HOP, bpm=global_tempo(envelope, sr), tightness=100, trim=False
     )
     beats = librosa.frames_to_time(np.asarray(frames), sr=sr, hop_length=ONSET_HOP)
     beats = _fold_tempo(beats)
-    phase = _downbeat_phase(mono, sr, beats)
+    phase = _downbeat_phase(mono, sr, beats, chroma, chroma_hop)
     return BeatEstimate(beats=beats, downbeats=beats[phase::BEATS_PER_BAR], source="builtin")
+
+
+def global_tempo(envelope: np.ndarray, sr: int, prior_bpm: float = 120.0) -> float:
+    """The track's main tempo: the strongest periodicity of the onset envelope.
+
+    One autocorrelation of the whole envelope (O(n log n) time, O(n) memory),
+    weighted by a log-normal prior around `prior_bpm` as librosa's tempo
+    estimate is, with parabolic interpolation between lags.
+    """
+    x = envelope.astype(np.float64) - float(np.mean(envelope))
+    n = len(x)
+    if n < 4:
+        return prior_bpm
+    spectrum = np.fft.rfft(x, 2 * n)
+    autocorr = np.fft.irfft(np.abs(spectrum) ** 2)[:n]
+
+    frames_per_minute = 60.0 * sr / ONSET_HOP
+    min_lag = max(1, int(frames_per_minute / 240.0))
+    max_lag = min(n - 2, int(np.ceil(frames_per_minute / 40.0)))
+    if max_lag <= min_lag:
+        return prior_bpm
+    lags = np.arange(min_lag, max_lag + 1)
+    bpms = frames_per_minute / lags
+    prior = np.exp(-0.5 * (np.log2(bpms / prior_bpm) / 1.0) ** 2)
+    scores = autocorr[lags] * prior
+    best = int(np.argmax(scores))
+
+    lag = float(lags[best])
+    if 0 < best < len(lags) - 1:
+        a, b, c = scores[best - 1], scores[best], scores[best + 1]
+        denominator = a - 2 * b + c
+        if denominator < 0:
+            lag += 0.5 * (a - c) / denominator
+    return float(frames_per_minute / lag)
 
 
 def _fold_tempo(beats: np.ndarray) -> np.ndarray:
@@ -144,7 +192,7 @@ def _fold_tempo(beats: np.ndarray) -> np.ndarray:
     return beats
 
 
-def _downbeat_phase(mono: np.ndarray, sr: int, beats: np.ndarray) -> int:
+def _downbeat_phase(mono: np.ndarray, sr: int, beats: np.ndarray, chroma: np.ndarray, hop: int) -> int:
     """Which of the four beat phases is the downbeat.
 
     Scores each phase by harmonic change (chords tend to change on the downbeat)
@@ -155,8 +203,6 @@ def _downbeat_phase(mono: np.ndarray, sr: int, beats: np.ndarray) -> int:
     if len(beats) < 2 * BEATS_PER_BAR:
         return 0
 
-    hop = 512
-    chroma = librosa.feature.chroma_stft(y=mono, sr=sr, hop_length=hop)
     beat_frames = librosa.time_to_frames(beats, sr=sr, hop_length=hop)
     beat_frames = np.clip(beat_frames, 0, chroma.shape[1] - 1)
     # sync() pads a segment before the first beat; drop it so column i is the
@@ -195,17 +241,19 @@ def fit_grid(beats: np.ndarray) -> tuple[float, float, float]:
     if len(beats) < 2:
         raise ValueError("need at least two beats to fit a grid")
     period = float(np.median(np.diff(beats)))
-    # Number beats by rounding to the median period so a missed or extra beat
-    # does not shift every later index.
-    index = np.round((beats - beats[0]) / period)
+    # Number the beats by counting each gap in median periods (1 normally, 2
+    # across a missed beat). Counting gaps rather than dividing each beat's time
+    # by the median period keeps a tiny error in that period (beats sit on
+    # analysis frames) from adding up over hundreds of beats.
+    steps = np.maximum(1.0, np.round(np.diff(beats) / period))
+    index = np.concatenate([[0.0], np.cumsum(steps)])
     slope, intercept = np.polyfit(index, beats, 1)
     deviation = float(np.median(np.abs(beats - (intercept + slope * index))) / slope)
     return float(slope), float(intercept), deviation
 
 
-def refine_phase(mono: np.ndarray, sr: int, period: float, offset: float) -> float:
-    """Move the grid offset to where onsets line up best, within ±40 ms."""
-    envelope = _onset_envelope(mono, sr)
+def refine_phase(envelope: np.ndarray, sr: int, period: float, offset: float) -> float:
+    """Move the grid offset to where onsets (`envelope`, from onset_envelope) line up best, within ±40 ms."""
     frame_time = ONSET_HOP / sr
     times = np.arange(len(envelope)) * frame_time
     # Onset envelopes peak a little after the attack; compare against the rise.
@@ -253,7 +301,7 @@ def downbeat_disagreement(a: np.ndarray, b: np.ndarray, tolerance: float = DOWNB
 
 
 def build_grid(
-    mono: np.ndarray,
+    envelope: np.ndarray,
     sr: int,
     duration: float,
     primary: BeatEstimate,
@@ -268,7 +316,7 @@ def build_grid(
     if variable:
         beats = primary.beats
     else:
-        offset = refine_phase(mono, sr, period, offset)
+        offset = refine_phase(envelope, sr, period, offset)
         beats = constant_grid(period, offset, duration)
 
     downbeat_indices = downbeat_indices_from(primary.downbeats, beats)

@@ -41,19 +41,30 @@ def integrated_lufs(samples: np.ndarray, sr: int) -> float | None:
     except Exception:
         pass
 
-    x = samples.astype(np.float64)
-    for b, a in _k_weighting(sr):
-        x = lfilter(b, a, x, axis=0)
-
-    block = int(round(0.4 * sr))
+    # K-weight and square the audio a few seconds at a time, carrying the filter
+    # state across, and keep only the energy of each 100 ms step. Blocks are
+    # four steps (400 ms) with a step's hop (75% overlap).
     step = int(round(0.1 * sr))
-    if len(x) < block:
+    if len(samples) < 4 * step:
         return None
 
-    # Mean square per channel per block, summed over channels (L/R weights are 1).
-    squares = np.cumsum(np.concatenate([np.zeros((1, x.shape[1])), x**2]), axis=0)
-    starts = np.arange(0, len(x) - block + 1, step)
-    block_power = ((squares[starts + block] - squares[starts]) / block).sum(axis=1)
+    filters = _k_weighting(sr)
+    channels = samples.shape[1]
+    states = [np.zeros((max(len(a), len(b)) - 1, channels)) for b, a in filters]
+    chunk = step * 100  # 10 s
+    step_energy = []
+    carry = np.zeros((0, channels))
+    for start in range(0, len(samples), chunk):
+        x = samples[start : start + chunk].astype(np.float64)
+        for i, (b, a) in enumerate(filters):
+            x, states[i] = lfilter(b, a, x, axis=0, zi=states[i])
+        x = np.concatenate([carry, x**2])
+        whole = len(x) // step * step
+        step_energy.append(x[:whole].reshape(-1, step, channels).sum(axis=1))
+        carry = x[whole:]
+    steps = np.concatenate(step_energy).sum(axis=1)  # channel weights are 1
+
+    block_power = np.convolve(steps, np.ones(4), mode="valid") / (4 * step)
 
     def loudness(power: np.ndarray) -> np.ndarray:
         return -0.691 + 10 * np.log10(np.maximum(power, 1e-20))

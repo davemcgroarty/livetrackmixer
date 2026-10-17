@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from djanalyze import beats, key, loudness, structure, waveform
+from djanalyze import beats, features, key, loudness, structure, waveform
 from djanalyze.beats import BeatEstimate
 
 
@@ -21,6 +21,17 @@ def test_fit_grid_recovers_tempo_through_jitter_and_a_missed_beat():
     assert 60 / fitted_period == pytest.approx(126, abs=0.05)
     assert offset == pytest.approx(0.3, abs=0.005)
     assert deviation < 0.02
+
+
+def test_fit_grid_does_not_drift_over_a_long_track():
+    """Beats quantised to 128-sample frames, over 6 minutes: the median gap is
+    slightly off, which must not misnumber beats late in the track."""
+    sr, hop, period = 44100, 128, 60 / 124
+    exact = 0.2 + period * np.arange(760)
+    quantised = np.round(exact * sr / hop) * hop / sr
+    fitted_period, offset, deviation = beats.fit_grid(quantised)
+    assert 60 / fitted_period == pytest.approx(124, abs=0.01)
+    assert deviation < 0.01
 
 
 def test_constant_grid_starts_at_the_first_beat_after_zero():
@@ -49,10 +60,10 @@ def _estimate(downbeat_phase: int, source: str) -> BeatEstimate:
 
 def test_cross_check_lowers_confidence_when_downbeats_disagree():
     sr = 8000
-    mono = np.zeros(sr * 33)
-    duration = len(mono) / sr
-    agree = beats.build_grid(mono, sr, duration, _estimate(0, "a"), _estimate(0, "b"))
-    disagree = beats.build_grid(mono, sr, duration, _estimate(0, "a"), _estimate(1, "b"))
+    duration = 33.0
+    envelope = np.zeros(int(duration * sr / beats.ONSET_HOP))
+    agree = beats.build_grid(envelope, sr, duration, _estimate(0, "a"), _estimate(0, "b"))
+    disagree = beats.build_grid(envelope, sr, duration, _estimate(0, "a"), _estimate(1, "b"))
     assert agree.confidence > 0.8
     assert disagree.confidence <= beats.LOW_BEAT_CONFIDENCE
     assert disagree.sources == ["a", "b"]
@@ -198,3 +209,50 @@ def test_waveform_rejects_other_files(tmp_path):
     path.write_bytes(b"RIFF" + bytes(40))
     with pytest.raises(ValueError):
         waveform.read(path)
+
+
+# ------------------------------------------------------------------ chunking
+
+
+def _test_signal(seconds: float, sr: int = 44100) -> np.ndarray:
+    rng = np.random.default_rng(3)
+    t = np.arange(int(seconds * sr)) / sr
+    clicks = (np.sin(2 * np.pi * 60 * t) * (np.mod(t, 0.5) < 0.05)).astype(np.float32)
+    return clicks + 0.05 * rng.standard_normal(len(t)).astype(np.float32) + 0.2 * np.sin(2 * np.pi * 440 * t)
+
+
+@pytest.mark.parametrize("length", [0.3, 7.77, 25.0])
+def test_chunked_stft_matches_a_whole_track_stft(length):
+    import librosa
+
+    y = _test_signal(length)
+    whole = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
+    chunked = features.chunked_stft(y, 2048, 512, lambda s, keep: np.abs(s[:, keep]), chunk_seconds=2.0)
+    assert chunked.shape == whole.shape
+    np.testing.assert_allclose(chunked, whole, rtol=1e-4, atol=1e-4)
+
+
+def test_chunked_onset_envelope_matches_librosa():
+    import librosa
+
+    y = _test_signal(25.0)
+    expected = librosa.onset.onset_strength(y=y, sr=44100, hop_length=beats.ONSET_HOP)
+    np.testing.assert_allclose(beats.onset_envelope(y, 44100), expected, rtol=1e-3, atol=1e-3)
+
+
+def test_chunked_features_match_whole_track_hpss():
+    """Chunk margins give the median filters enough context to match a single pass."""
+    import librosa
+
+    y = _test_signal(45.0)
+    spectral = features.compute(y, 44100)
+    stft = librosa.stft(y, n_fft=features.N_FFT, hop_length=features.HOP)
+    _, percussive = librosa.decompose.hpss(stft)
+    window = np.hanning(features.N_FFT + 1)[:-1]
+    scale = 2.0 / (features.N_FFT * np.sum(window**2)) / 0.5
+    melody = (librosa.fft_frequencies(sr=44100, n_fft=features.N_FFT) >= 200) & (
+        librosa.fft_frequencies(sr=44100, n_fft=features.N_FFT) < 4000
+    )
+    expected = ((np.abs(percussive) ** 2) * scale)[melody].sum(axis=0)
+    assert spectral.num_frames == stft.shape[1]
+    np.testing.assert_allclose(spectral.melody_percussive, expected, rtol=1e-3, atol=1e-6)

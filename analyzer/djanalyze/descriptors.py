@@ -16,10 +16,6 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .features import Spectral, to_db
-
-BASS_CUTOFF_HZ = 150.0
-HIGH_CUTOFF_HZ = 5000.0
-MELODY_BAND_HZ = (200.0, 4000.0)
 GRID_TOLERANCE_SECONDS = 0.03
 
 
@@ -64,8 +60,7 @@ class BarDescriptors:
 def _percussive_onsets(spectral: Spectral) -> np.ndarray:
     import librosa
 
-    mel = librosa.feature.melspectrogram(S=spectral.percussive, sr=spectral.sr, n_mels=64)
-    return librosa.onset.onset_strength(S=librosa.power_to_db(mel, ref=1.0), sr=spectral.sr)
+    return librosa.onset.onset_strength(S=spectral.percussive_mel_db, sr=spectral.sr)
 
 
 def _regularity(onsets: np.ndarray, frame_seconds: float, frames: slice, grid: np.ndarray) -> float:
@@ -105,13 +100,8 @@ def compute(
     salience: np.ndarray | None = None,
 ) -> BarDescriptors:
     """Score every bar. `salience` is an optional per-frame pitch salience (Essentia)."""
-    import librosa
-
     onsets = _percussive_onsets(spectral)
-    chroma = librosa.feature.chroma_stft(S=spectral.harmonic, sr=spectral.sr)
-    bass_band = spectral.band(0.0, BASS_CUTOFF_HZ)
-    high_band = spectral.band(HIGH_CUTOFF_HZ, spectral.sr)
-    melody_band = spectral.band(*MELODY_BAND_HZ)
+    total_power = spectral.total
 
     # 8th-note positions across the track.
     if len(beats) > 1:
@@ -122,30 +112,27 @@ def compute(
     out = BarDescriptors()
     for start, end in bar_spans:
         frames = spectral.frames(start, end)
-        power = spectral.power[:, frames]
-        harmonic = spectral.harmonic[:, frames]
-        percussive = spectral.percussive[:, frames]
 
         onset_strength = float(onsets[frames].mean()) if onsets[frames].size else 0.0
         regularity = _regularity(onsets, spectral.frame_seconds, frames, eighths[(eighths >= start) & (eighths < end)])
-        bass_db = float(to_db(power[bass_band].sum(axis=0).mean()))
-        high_db = float(to_db(power[high_band].sum(axis=0).mean()))
-        melody_power = harmonic[melody_band].sum(axis=0).mean()
+        bass_db = float(to_db(spectral.bass[frames].mean()))
+        high_db = float(to_db(spectral.high[frames].mean()))
+        melody_power = spectral.melody_harmonic[frames].mean()
         melody_db = float(to_db(melody_power))
 
         if salience is not None:
             bar_salience = float(np.clip(np.mean(salience[frames]) if salience[frames].size else 0.0, 0.0, 1.0))
         else:
             # Without Essentia: share of the band's energy that is harmonic.
-            total = melody_power + percussive[melody_band].sum(axis=0).mean()
+            total = melody_power + spectral.melody_percussive[frames].mean()
             bar_salience = float(melody_power / total) if total > 0 else 0.0
-        clarity = _chroma_clarity(chroma[:, frames])
+        clarity = _chroma_clarity(spectral.harmonic_chroma[:, frames])
 
         out.rhythm.append(REFERENCE["rhythm_onset"].score(onset_strength) * regularity)
         out.bass.append(REFERENCE["bass_db"].score(bass_db))
         out.high.append(REFERENCE["high_db"].score(high_db))
         out.melody.append(REFERENCE["melody_db"].score(melody_db) * (0.5 * clarity + 0.5 * bar_salience))
-        out.energy.append(REFERENCE["energy_db"].score(float(to_db(power.sum(axis=0).mean()))))
+        out.energy.append(REFERENCE["energy_db"].score(float(to_db(total_power[frames].mean()))))
 
         out.raw["rhythmOnsetStrength"].append(onset_strength)
         out.raw["rhythmRegularity"].append(regularity)

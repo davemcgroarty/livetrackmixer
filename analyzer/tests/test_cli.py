@@ -17,7 +17,7 @@ import soundfile
 import djanalyze
 from djanalyze import audio, cli, pipeline, schema, waveform
 from djanalyze.progress import Progress
-from conftest import REPO
+from conftest import REPO, generate
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess:
@@ -54,7 +54,7 @@ def test_progress_lines(analysed):
         stages = [line["stage"] for line in lines]
         assert stages[0] == "hash"
         assert stages[-1] == "done"
-        for expected in ("decode", "beats", "structure", "key", "descriptors", "waveform", "write"):
+        for expected in ("decode", "spectrum", "beats", "structure", "key", "descriptors", "waveform", "write"):
             assert expected in stages
         progress = [line["progress"] for line in lines]
         assert progress == sorted(progress), "progress never goes backwards"
@@ -159,3 +159,38 @@ def test_unreadable_format_without_ffmpeg_names_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(audio.shutil, "which", lambda _: None)
     with pytest.raises(ValueError, match="ffmpeg"):
         audio.decode(fake)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="peak memory is read with the resource module")
+def test_long_tracks_analyse_in_bounded_memory(tmp_path):
+    """A 6-minute track must not need memory in proportion to its length."""
+    import copy
+
+    import soundfile as sf
+
+    clip = copy.deepcopy(next(c for c in generate.load_manifest() if c["name"] == "house_124_a_minor"))
+    clip["sections"] = clip["sections"] * 6  # 192 bars at 124 BPM: 6 min 12 s
+    audio_data, reference = generate.render(clip)
+    long_track = tmp_path / "long.wav"
+    sf.write(long_track, audio_data, generate.SAMPLE_RATE)
+
+    script = (
+        "import resource, sys\n"
+        "from djanalyze import cli\n"
+        "code = cli.main(sys.argv[1:])\n"
+        "print('peak_mb', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1 << 20 if sys.platform == 'darwin' else 1 << 10))\n"
+        "sys.exit(code)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, "analyze", str(long_track), "--out", str(tmp_path / "cache"), "--engine", "builtin"],
+        capture_output=True, text=True, check=False, cwd=REPO,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    peak = float(result.stdout.splitlines()[-1].split()[1])
+    # Python, numpy, librosa and numba take a few hundred MB before any audio.
+    assert peak < 1000, f"peak memory {peak:.0f} MB"
+    done = json.loads(result.stdout.splitlines()[-2])
+    document = json.loads(open(done["json"]).read())
+    assert document["tempo"]["bpm"] == pytest.approx(reference.bpm, abs=0.5)
+    assert document["tempo"]["variable"] is False
+    assert [s["startBar"] for s in document["sections"]][:4] == reference.section_start_bars[:4]
