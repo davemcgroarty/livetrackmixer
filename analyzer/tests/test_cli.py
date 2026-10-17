@@ -161,19 +161,8 @@ def test_unreadable_format_without_ffmpeg_names_ffmpeg(tmp_path, monkeypatch):
         audio.decode(fake)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="peak memory is read with the resource module")
-def test_long_tracks_analyse_in_bounded_memory(tmp_path):
-    """A 6-minute track must not need memory in proportion to its length."""
-    import copy
-
-    import soundfile as sf
-
-    clip = copy.deepcopy(next(c for c in generate.load_manifest() if c["name"] == "house_124_a_minor"))
-    clip["sections"] = clip["sections"] * 6  # 192 bars at 124 BPM: 6 min 12 s
-    audio_data, reference = generate.render(clip)
-    long_track = tmp_path / "long.wav"
-    sf.write(long_track, audio_data, generate.SAMPLE_RATE)
-
+def _analyse_and_measure(track, cache_dir):
+    """Analyse `track` in a fresh process; return (peak memory in MB, analysis document)."""
     script = (
         "import resource, sys\n"
         "from djanalyze import cli\n"
@@ -182,15 +171,44 @@ def test_long_tracks_analyse_in_bounded_memory(tmp_path):
         "sys.exit(code)\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", script, "analyze", str(long_track), "--out", str(tmp_path / "cache"), "--engine", "builtin"],
+        [sys.executable, "-c", script, "analyze", str(track), "--out", str(cache_dir), "--engine", "builtin"],
         capture_output=True, text=True, check=False, cwd=REPO,
     )  # fmt: skip
     assert result.returncode == 0, result.stdout + result.stderr
     peak = float(result.stdout.splitlines()[-1].split()[1])
-    # Python, numpy, librosa and numba take a few hundred MB before any audio.
-    assert peak < 1000, f"peak memory {peak:.0f} MB"
     done = json.loads(result.stdout.splitlines()[-2])
-    document = json.loads(open(done["json"]).read())
+    return peak, json.loads(open(done["json"]).read())
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="peak memory is read with the resource module")
+def test_long_tracks_analyse_in_bounded_memory(tmp_path):
+    """Memory must not grow with track length beyond the decoded audio itself.
+
+    Compares a 2-minute and a 6-minute version of one track, so the result does
+    not depend on how much each platform's libraries take at start-up (macOS
+    reports several hundred MB more than Linux for the same run).
+    """
+    import copy
+
+    import soundfile as sf
+
+    base = next(c for c in generate.load_manifest() if c["name"] == "house_124_a_minor")
+    peaks = {}
+    for repeats in (2, 6):  # 64 and 192 bars at 124 BPM
+        clip = copy.deepcopy(base)
+        clip["sections"] = base["sections"] * repeats
+        audio_data, reference = generate.render(clip)
+        track = tmp_path / f"track{repeats}.wav"
+        sf.write(track, audio_data, generate.SAMPLE_RATE)
+        peaks[repeats], document = _analyse_and_measure(track, tmp_path / "cache")
+
+    # The 4 extra minutes hold about 130 MB of decoded audio and per-frame
+    # features; whole-track spectrograms cost gigabytes.
+    growth = peaks[6] - peaks[2]
+    assert growth < 400, f"peak memory grew by {growth:.0f} MB ({peaks[2]:.0f} -> {peaks[6]:.0f} MB)"
+    assert peaks[6] < 2500, f"peak memory {peaks[6]:.0f} MB"
+
+    # And the long track's analysis is right: constant tempo, sections on time.
     assert document["tempo"]["bpm"] == pytest.approx(reference.bpm, abs=0.5)
     assert document["tempo"]["variable"] is False
     assert [s["startBar"] for s in document["sections"]][:4] == reference.section_start_bars[:4]
