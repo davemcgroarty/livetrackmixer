@@ -302,10 +302,12 @@ TEST_CASE ("The audio callback never allocates while cueing", "[audio][cue][real
     CHECK (djmix::test::realtimeAllocations() == 0);
 
     // The check itself works: an allocation on a real-time thread is counted.
+    // (Called directly, as the compiler may leave out a new-expression whose
+    // result is never used.)
     {
         djmix::rt::ScopedRealtimeThread realtime;
-        auto* leak = new std::vector<int> (16);
-        delete leak;
+        void* p = ::operator new (64);
+        ::operator delete (p);
     }
     CHECK (djmix::test::realtimeAllocations() > 0);
 }
