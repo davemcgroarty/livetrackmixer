@@ -147,6 +147,7 @@ void TrackView::showAnalysis (const TrackAnalysis& analysis,
     base = analysis;
     overrides = {};
     preview.reset();
+    selectedSections.clear();
     taps.reset();
     structure = TrackStructure (analysis);
     pyramid = WaveformPyramid (waveform);
@@ -166,6 +167,8 @@ void TrackView::showAnalysis (const TrackAnalysis& analysis,
 
 void TrackView::setOverrides (const TrackOverrides& next)
 {
+    if (next != overrides)
+        selectedSections.clear(); // section numbers may have changed
     overrides = next;
     preview.reset();
     applyOverrides();
@@ -189,6 +192,7 @@ void TrackView::commit (TrackOverrides next, bool continuing)
         return;
     }
     overrides = next;
+    selectedSections.clear();
     applyOverrides();
     if (onEditOverrides)
         onEditOverrides (next, continuing);
@@ -212,6 +216,8 @@ void TrackView::showEditMenu (juce::Point<float> position)
     const int section = structure.sectionAt (time);
     const int bar = structure.barAt (time);
     const bool gridEdited = ! overrides.grid.isEmpty();
+    const auto beat = structure.beatNear (time);
+    menuBeatTime = beat ? std::optional<double> (beat->time) : std::nullopt;
 
     juce::PopupMenu menu;
     menu.addSectionHeader ("Grid");
@@ -222,7 +228,9 @@ void TrackView::showEditMenu (juce::Point<float> position)
         item.action = std::move (action);
         return item;
     };
-    menu.addItem (withShortcut ("Make this beat the downbeat", "D", [this, time] { commit (edits::setDownbeat (base, overrides, time)); }));
+    if (beat)
+        menu.addItem (withShortcut ("Make " + describe (*beat).toLowerCase() + " the downbeat", "D",
+                                    [this, t = beat->time] { commit (edits::setDownbeat (base, overrides, t)); }));
     menu.addItem (withShortcut ("Nudge grid earlier (5 ms)", "Alt+Left", [this] { commit (edits::nudge (overrides, -0.005)); }));
     menu.addItem (withShortcut ("Nudge grid later (5 ms)", "Alt+Right", [this] { commit (edits::nudge (overrides, 0.005)); }));
     menu.addItem ("Halve BPM", [this] { commit (edits::scaleBpm (base, overrides, 0.5)); });
@@ -231,6 +239,21 @@ void TrackView::showEditMenu (juce::Point<float> position)
     menu.addItem ("Reset grid to the analysis", gridEdited, false, [this] { commit (edits::resetGrid (overrides)); });
 
     menu.addSectionHeader ("Sections");
+    if (selectedSections.size() >= 2)
+    {
+        if (const auto run = selectedRun())
+        {
+            const auto& first = e.sections[static_cast<size_t> (run->first)];
+            const auto& last = e.sections[static_cast<size_t> (run->second)];
+            menu.addItem ("Merge the " + juce::String (static_cast<int> (selectedSections.size())) + " selected sections (bars "
+                              + juce::String (first.startBar) + "-" + juce::String (last.startBar + last.lengthBars - 1) + ")",
+                          [this, r = *run] { commit (edits::mergeSections (base, overrides, r.first, r.second)); });
+        }
+        else
+        {
+            menu.addItem ("Merge the selected sections (they must be next to each other)", false, false, [] {});
+        }
+    }
     if (bar >= 0)
     {
         // At the start of the bar clicked, as the item says.
@@ -246,7 +269,18 @@ void TrackView::showEditMenu (juce::Point<float> position)
     menu.addItem ("Reset sections to the analysis", overrides.sectionStarts.has_value(), false,
                   [this] { commit (edits::resetSections (overrides)); });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    repaint();
+    juce::Component::SafePointer<TrackView> self (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), [self] (int)
+    {
+        if (self != nullptr)
+        {
+            self->menuBeatTime.reset();
+            self->repaint();
+            // Keys (Cmd/Ctrl+Z straight after an edit) come back here, not to the closed menu.
+            self->grabKeyboardFocus();
+        }
+    });
 }
 
 void TrackView::askForBpm()
@@ -357,14 +391,104 @@ void TrackView::paint (juce::Graphics& g)
         paintBars (g, waveArea);
         paintWaveform (g, waveArea);
         paintGrid (g, waveArea);
+        paintBeatTarget (g);
     }
     {
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (stripArea);
         paintSectionStrip (g, stripArea);
     }
+    paintSelection (g);
     paintAudition (g);
     paintHover (g);
+}
+
+std::optional<TrackStructure::BeatPosition> TrackView::targetBeat() const
+{
+    if (menuBeatTime)
+        return structure.beatNear (*menuBeatTime);
+    if (hover && ! dragging && waveArea.contains (hover->toInt()))
+        return structure.beatNear (timeAt (hover->x));
+    return std::nullopt;
+}
+
+juce::String TrackView::describe (const TrackStructure::BeatPosition& beat)
+{
+    if (beat.bar < 0)
+        return "The beat before bar 1";
+    return "Beat " + juce::String (beat.beatInBar) + " of bar " + juce::String (beat.bar + 1);
+}
+
+void TrackView::paintBeatTarget (juce::Graphics& g)
+{
+    const auto beat = targetBeat();
+    if (! beat)
+        return;
+
+    // The beat a downbeat edit would move: an accent line through the waveform
+    // with its name at the top. It stays put while the edit menu is open.
+    const juce::Colour accent (0xffffd166);
+    const float x = timeToX (beat->time);
+    const auto top = static_cast<float> (waveArea.getY());
+    g.setColour (accent.withAlpha (menuBeatTime ? 1.0f : 0.8f));
+    g.fillRect (juce::Rectangle<float> (x - 1.0f, top, 2.0f, static_cast<float> (waveArea.getHeight())));
+    juce::Path marker;
+    marker.addTriangle (x - 5.0f, top, x + 5.0f, top, x, top + 7.0f);
+    g.fillPath (marker);
+
+    const auto label = beat->bar < 0 ? juce::String ("Before bar 1")
+                                     : "Bar " + juce::String (beat->bar + 1) + ", beat " + juce::String (beat->beatInBar);
+    g.setFont (12.0f);
+    const float w = static_cast<float> (juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label)) + 12.0f;
+    auto box = juce::Rectangle<float> (x + 6.0f, top + 4.0f, w, 18.0f);
+    if (box.getRight() > static_cast<float> (waveArea.getRight()))
+        box.setX (x - 6.0f - w);
+    g.setColour (juce::Colour (0xe0181b1f));
+    g.fillRoundedRectangle (box, 3.0f);
+    g.setColour (accent);
+    g.drawText (label, box, juce::Justification::centred);
+}
+
+std::optional<std::pair<int, int>> TrackView::selectedRun() const
+{
+    if (selectedSections.empty())
+        return std::nullopt;
+    const int first = *selectedSections.begin();
+    const int last = *selectedSections.rbegin();
+    if (last - first + 1 != static_cast<int> (selectedSections.size()))
+        return std::nullopt;
+    return std::pair (first, last);
+}
+
+void TrackView::paintSelection (juce::Graphics& g)
+{
+    const auto& sections = structure.data().sections;
+    if (selectedSections.empty() || ! loaded)
+        return;
+
+    juce::Graphics::ScopedSaveState state (g);
+    g.reduceClipRegion (stripArea.getUnion (waveArea));
+    const auto top = static_cast<float> (stripArea.getY());
+    const auto height = static_cast<float> (waveArea.getBottom() - stripArea.getY());
+
+    // One outline around each run of selected sections next to each other.
+    for (auto it = selectedSections.begin(); it != selectedSections.end();)
+    {
+        int last = *it;
+        auto next = std::next (it);
+        while (next != selectedSections.end() && *next == last + 1)
+            last = *next++;
+        if (static_cast<size_t> (last) < sections.size())
+        {
+            const float x0 = timeToX (sections[static_cast<size_t> (*it)].start);
+            const float x1 = timeToX (sections[static_cast<size_t> (last)].end);
+            g.setColour (juce::Colours::white.withAlpha (0.18f));
+            g.fillRect (juce::Rectangle<float> (x0, top + 2.0f, x1 - x0, static_cast<float> (stripArea.getHeight()) - 4.0f));
+            g.setColour (juce::Colours::white.withAlpha (0.85f));
+            g.drawRect (juce::Rectangle<float> (x0, top, x1 - x0, height), 2.0f);
+        }
+        it = next;
+    }
 }
 
 void TrackView::paintAudition (juce::Graphics& g)
@@ -422,6 +546,13 @@ void TrackView::paintHeader (juce::Graphics& g, juce::Rectangle<int> area)
     }
 
     juce::String warning = status;
+    if (warning.isEmpty() && ! selectedSections.empty())
+    {
+        const auto n = static_cast<int> (selectedSections.size());
+        warning = juce::String (n) + (n == 1 ? " section selected" : " sections selected");
+        if (n >= 2)
+            warning << (selectedRun() ? " - right-click to merge" : " - not next to each other");
+    }
     if (loaded && warning.isEmpty() && overrides.grid.isEmpty() && structure.data().beatConfidence < beatConfidenceWarning)
         warning = "Check beats";
 
@@ -825,7 +956,7 @@ void TrackView::mouseUp (const juce::MouseEvent& e)
     hover = e.position;
     repaint();
     if (! wasDrag && e.mouseWasClicked() && ! e.mods.isPopupMenu())
-        handleClick (e.position);
+        handleClick (e.position, e.mods);
 }
 
 void TrackView::setCueMode (CueMode mode)
@@ -876,7 +1007,7 @@ juce::String TrackView::getTooltip()
     return {};
 }
 
-void TrackView::handleClick (juce::Point<float> position)
+void TrackView::handleClick (juce::Point<float> position, juce::ModifierKeys mods)
 {
     if (modeButtonArea.toFloat().contains (position))
     {
@@ -894,6 +1025,25 @@ void TrackView::handleClick (juce::Point<float> position)
         return;
 
     const double time = range.xToTime (position.x - waveArea.getX());
+
+    // Shift-click adds a section to the selection, or takes it out.
+    if (mods.isShiftDown())
+    {
+        const int section = structure.sectionAt (time);
+        if (section >= 0 && (stripArea.toFloat().contains (position) || waveArea.toFloat().contains (position)))
+        {
+            if (! selectedSections.erase (section))
+                selectedSections.insert (section);
+            repaint();
+        }
+        return;
+    }
+    if (! selectedSections.empty())
+    {
+        selectedSections.clear();
+        repaint();
+    }
+
     if (stripArea.toFloat().contains (position))
     {
         const int section = structure.sectionAt (time);
@@ -983,6 +1133,12 @@ void TrackView::mouseMagnify (const juce::MouseEvent& e, float scaleFactor)
 
 bool TrackView::keyPressed (const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::escapeKey && ! selectedSections.empty())
+    {
+        selectedSections.clear();
+        repaint();
+        return true;
+    }
     if (key == juce::KeyPress::escapeKey && audition)
     {
         if (onStopAudition)

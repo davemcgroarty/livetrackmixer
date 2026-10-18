@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <optional>
+#include <set>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -35,6 +36,8 @@ namespace djmix
 // (TrackOverrides), sent to onEditOverrides to save: right-click for the edit
 // menu, Alt-drag to move the grid, drag a section boundary in the strip,
 // Alt+arrows to nudge, D to set the downbeat at the pointer, T to tap tempo.
+// The beat a downbeat edit would move is marked while the pointer is over the
+// waveform. Shift-click selects sections; next-door ones merge from the menu.
 class TrackView final : public juce::Component,
                         public juce::TooltipClient,
                         private juce::ScrollBar::Listener
@@ -135,8 +138,16 @@ private:
     void paintHover (juce::Graphics&);
     void paintAudition (juce::Graphics&);
     void paintCueModeIcon (juce::Graphics&, juce::Rectangle<float> area) const;
+    void paintBeatTarget (juce::Graphics&);
+    void paintSelection (juce::Graphics&);
 
-    void handleClick (juce::Point<float> position);
+    // The beat a downbeat edit would move: under the open menu, or the pointer.
+    std::optional<TrackStructure::BeatPosition> targetBeat() const;
+    static juce::String describe (const TrackStructure::BeatPosition& beat);
+    // Selected sections as one run (first, last), if they are next to each other.
+    std::optional<std::pair<int, int>> selectedRun() const;
+
+    void handleClick (juce::Point<float> position, juce::ModifierKeys mods);
     void showEditMenu (juce::Point<float> position);
     void askForBpm();
     void tapTempo();
@@ -184,6 +195,8 @@ private:
     int dragSection = -1;
     TapTempo taps;
     bool tapping = false;
+    std::set<int> selectedSections;     // shift-clicked, by index
+    std::optional<double> menuBeatTime; // the beat the open menu acts on
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackView)
 };

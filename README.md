@@ -126,7 +126,9 @@ them in the Track view. Right-click for the edit menu.
 
 The grid:
 - **Downbeat:** make the beat under the pointer the downbeat, with the menu or
-  **D**.
+  **D**. While the pointer is over the waveform, that beat is marked with an
+  accent line and named ("Bar 19, beat 2"). The mark stays put while the menu
+  is open, and the menu item names the same beat.
 - **Nudge:** move the whole grid 5 ms with **Alt+Left/Right**, or 1 ms with
   **Shift** as well. **Alt-drag** in the waveform moves the grid with the
   pointer, to lay a beat line on a hit.
@@ -136,7 +138,11 @@ The grid:
 
 Sections:
 - **Split:** start a section at the bar you clicked.
-- **Merge:** join a section with the next one.
+- **Merge:** join a section with the next one. To join several,
+  **Shift-click** them (in the strip or the waveform), then right-click: next-
+  door sections offer "Merge the N selected sections". Selected sections are
+  outlined and the header counts them. A plain click or **Esc** clears the
+  selection.
 - **Move:** drag a boundary in the section strip. It snaps to bars.
 - **Reset sections** returns to the analysis.
 

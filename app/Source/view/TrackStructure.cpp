@@ -82,6 +82,24 @@ bool TrackStructure::startsSection (int bar) const
     return bar >= 0 && static_cast<size_t> (bar) < sectionStarts.size() && sectionStarts[static_cast<size_t> (bar)];
 }
 
+std::optional<TrackStructure::BeatPosition> TrackStructure::beatNear (double seconds) const
+{
+    const auto& beats = analysis.beats;
+    if (beats.empty())
+        return std::nullopt;
+    auto it = std::lower_bound (beats.begin(), beats.end(), seconds);
+    if (it == beats.end() || (it != beats.begin() && seconds - *(it - 1) <= *it - seconds))
+        --it;
+
+    BeatPosition b;
+    b.index = static_cast<int> (std::distance (beats.begin(), it));
+    b.time = *it;
+    b.bar = barAt (b.time);
+    if (b.bar >= 0)
+        b.beatInBar = b.index - analysis.bars[static_cast<size_t> (b.bar)].firstBeat + 1;
+    return b;
+}
+
 TrackStructure::GridVisibility TrackStructure::gridAt (double pixelsPerSecond) const
 {
     const double perBeat = pixelsPerSecond * period;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -46,6 +47,17 @@ public:
     double beatPeriod() const { return period; }
 
     GridVisibility gridAt (double pixelsPerSecond) const;
+
+    // The beat nearest a time (ties go to the earlier beat, as grid edits do),
+    // with the bar it falls in (-1 before the first bar) and its place in it.
+    struct BeatPosition
+    {
+        int index = 0;      // into the analysis's beats
+        double time = 0.0;
+        int bar = -1;       // 0-based
+        int beatInBar = 0;  // 1-based
+    };
+    std::optional<BeatPosition> beatNear (double seconds) const;
 
     const TrackAnalysis& data() const { return analysis; }
 

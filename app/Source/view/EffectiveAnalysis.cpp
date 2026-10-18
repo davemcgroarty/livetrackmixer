@@ -269,6 +269,19 @@ namespace edits
         return r;
     }
 
+    TrackOverrides mergeSections (const TrackAnalysis& a, const TrackOverrides& o, int first, int last)
+    {
+        const auto e = effectiveAnalysis (a, o);
+        auto starts = sectionStartTimes (e);
+        const auto count = static_cast<int> (starts.size());
+        if (first < 0 || last >= count || last <= first)
+            return o;
+        starts.erase (starts.begin() + first + 1, starts.begin() + last + 1);
+        auto r = o;
+        r.sectionStarts = starts;
+        return r;
+    }
+
     TrackOverrides moveSectionStart (const TrackAnalysis& a, const TrackOverrides& o, int index, double time)
     {
         const auto e = effectiveAnalysis (a, o);

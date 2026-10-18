@@ -186,6 +186,28 @@ TEST_CASE ("TrackStructure finds bars, sections and phrase starts", "[view]")
     CHECK_FALSE (s.startsSection (8));
 }
 
+TEST_CASE ("TrackStructure finds the beat nearest a time, and its place in the bar", "[view]")
+{
+    const TrackStructure s (syntheticAnalysis()); // beats every 0.5 s from 0.25, bars of 4
+
+    auto b = s.beatNear (1.3); // nearest 1.25: the third beat of bar 1
+    REQUIRE (b);
+    CHECK (b->index == 2);
+    CHECK (b->time == Approx (1.25));
+    CHECK (b->bar == 0);
+    CHECK (b->beatInBar == 3);
+
+    b = s.beatNear (2.1); // nearest 2.25: bar 2 starts there
+    CHECK (b->bar == 1);
+    CHECK (b->beatInBar == 1);
+
+    CHECK (s.beatNear (1.5)->time == Approx (1.25)); // halfway: the earlier one
+    CHECK (s.beatNear (-3.0)->index == 0);
+    CHECK (s.beatNear (1e6)->index == 255);
+    CHECK (s.beatNear (1e6)->beatInBar == 4);
+    CHECK_FALSE (TrackStructure().beatNear (1.0));
+}
+
 TEST_CASE ("TrackStructure leaves out grid lines that would crowd together", "[view]")
 {
     const TrackStructure s (syntheticAnalysis());

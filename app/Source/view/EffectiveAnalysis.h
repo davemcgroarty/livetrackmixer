@@ -46,6 +46,9 @@ namespace edits
     // Joins section `index` (0-based, effective sections) to the one after it.
     TrackOverrides mergeWithNext (const TrackAnalysis& analysis, const TrackOverrides& overrides, int index);
 
+    // Joins sections first to last (0-based, effective sections) into one.
+    TrackOverrides mergeSections (const TrackAnalysis& analysis, const TrackOverrides& overrides, int first, int last);
+
     // Moves the start of section `index` (not the first) to the bar nearest
     // `time`, keeping at least one bar in it and in the section before.
     TrackOverrides moveSectionStart (const TrackAnalysis& analysis, const TrackOverrides& overrides, int index, double time);

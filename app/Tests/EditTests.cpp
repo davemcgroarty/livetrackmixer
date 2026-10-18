@@ -158,6 +158,30 @@ TEST_CASE ("Sections split, merge and move by whole bars", "[edit]")
     CHECK (edits::resetSections (o).isEmpty());
 }
 
+TEST_CASE ("Several sections merge into one", "[edit]")
+{
+    const auto a = analysis();
+    auto o = edits::splitSection (a, {}, 50.25); // sections at bars 1, 17, 26, 49
+
+    // The middle two.
+    auto merged = edits::mergeSections (a, o, 1, 2);
+    CHECK (sectionStartBars (effectiveAnalysis (a, merged)) == std::vector<int> { 1, 17, 49 });
+
+    // Three at once, to the end.
+    merged = edits::mergeSections (a, o, 1, 3);
+    CHECK (sectionStartBars (effectiveAnalysis (a, merged)) == std::vector<int> { 1, 17 });
+
+    // All of them.
+    merged = edits::mergeSections (a, o, 0, 3);
+    CHECK (sectionStartBars (effectiveAnalysis (a, merged)) == std::vector<int> { 1 });
+
+    // Nothing to merge, or out of range.
+    CHECK (edits::mergeSections (a, o, 2, 2) == o);
+    CHECK (edits::mergeSections (a, o, 2, 1) == o);
+    CHECK (edits::mergeSections (a, o, 1, 9) == o);
+    CHECK (edits::mergeSections (a, o, -1, 2) == o);
+}
+
 TEST_CASE ("Section edits stay where the music is when the grid changes", "[edit]")
 {
     const auto a = analysis();
