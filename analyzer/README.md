@@ -56,16 +56,36 @@ section, and `perBar.raw` holds the measurements behind them.
 
 | Score | Measurement | 0 at | 1 at |
 | --- | --- | --- | --- |
-| rhythm | percussive (HPSS) onset strength × how much of it lands within 30 ms of the 8th-note grid | 0 | 1.5 |
+| rhythm | percussive (HPSS) onset strength (0 at 0.2, 1 at 0.9) × periodicity (0 at 0.1, 1 at 0.8) | see ranges | see ranges |
 | bass | energy below 150 Hz | −45 dBFS | −5 dBFS |
 | high | energy above 5 kHz | −60 dBFS | −20 dBFS |
 | melody | harmonic (HPSS) energy from 200 Hz to 4 kHz × (chroma clarity + harmonic share) / 2 | −50 dBFS | −12 dBFS |
 | energyPerBar | full-band energy | −45 dBFS | −3 dBFS |
 
+Periodicity is how strongly the onsets around a bar repeat every beat, half bar
+or bar. It is the autocorrelation of the onset envelope over the bar and one bar
+either side, lightly smoothed so that human timing doesn't count against it. It
+needs the beat period but not the exact grid, so syncopation, 16th-note hats
+and swing still read as steady. `raw.rhythmRegularity` stores it.
+
 These reference ranges are fixed (`REFERENCE` in `descriptors.py`), so scores
-compare across tracks. They were set on the synthetic test clips, which master
-to about −15 LUFS, with headroom for louder masters. They still need checking
-against a sample of real tracks.
+compare across tracks. The dB ranges were set on the synthetic test clips,
+which master to about −15 LUFS, with headroom for louder masters; they still
+need checking against a sample of real tracks.
+
+The rhythm ranges were set against real recordings. Median bar scores in
+0.1.3:
+
+| Material | Rhythm |
+| --- | --- |
+| synthetic house and techno, kick sections | 1.0 |
+| electronic and drum & bass tracks | 0.8–0.9 |
+| ragtime piano, pizzicato orchestra | about 0.8 |
+| string orchestra with rubato | 0.36 |
+| solo trumpet | 0.09 |
+
+A steady pulse from any instrument counts, not only drums. Rhythm from the
+drums stem (planned with stems) will tell them apart.
 
 ## Tests
 

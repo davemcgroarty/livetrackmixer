@@ -5,8 +5,47 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from djanalyze import beats, features, key, loudness, structure, waveform
+from djanalyze import beats, descriptors, features, key, loudness, structure, waveform
 from djanalyze.beats import BeatEstimate
+
+
+# --------------------------------------------------------------- descriptors
+
+FRAME = 512 / 44100
+
+
+def _onset_train(times: np.ndarray, length_frames: int) -> np.ndarray:
+    envelope = np.zeros(length_frames)
+    np.add.at(envelope, np.clip(np.round(times / FRAME).astype(int), 0, length_frames - 1), 1.0)
+    return descriptors._smoothed(envelope)
+
+
+def test_a_steady_beat_is_periodic_despite_human_timing():
+    rng = np.random.default_rng(1)
+    period = 60 / 126
+    # Kicks on the beat and hats on the 16ths around them, played by hand.
+    grid = np.arange(0, 40, period / 4)
+    hits = grid + rng.normal(0, 0.008, len(grid))
+    envelope = _onset_train(hits, int(42 / FRAME))
+    bar = 4 * period
+    assert descriptors._periodicity(envelope, FRAME, 10 * bar, 11 * bar, period) > 0.8
+
+
+def test_onsets_without_a_pulse_are_not_periodic():
+    rng = np.random.default_rng(2)
+    period = 60 / 126
+    envelope = _onset_train(np.sort(rng.uniform(0, 40, 300)), int(42 / FRAME))
+    bar = 4 * period
+    # Any one bar can line up by chance; on average random onsets stay low.
+    values = [descriptors._periodicity(envelope, FRAME, k * bar, (k + 1) * bar, period) for k in range(1, 19)]
+    assert np.mean(values) < 0.2
+    assert descriptors._periodicity(np.zeros(1000), FRAME, 1.0, 3.0, period) == 0.0
+
+
+def test_local_period_follows_a_tempo_change():
+    beats_ = np.concatenate([np.arange(0, 30, 0.5), 30 + np.arange(0, 30, 0.4)])
+    assert descriptors._local_period(beats_, 10, 12) == pytest.approx(0.5)
+    assert descriptors._local_period(beats_, 45, 46.6) == pytest.approx(0.4)
 
 
 # --------------------------------------------------------------------- beats

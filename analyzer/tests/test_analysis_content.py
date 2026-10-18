@@ -90,6 +90,15 @@ def test_descriptors_follow_the_parts(analysed, quality, part):
     assert compared > 0
 
 
+@pytest.mark.parametrize("name", ["house_124_a_minor", "techno_128_f_sharp_minor", "deep_120_d_minor"])
+def test_a_four_on_the_floor_beat_scores_high_on_rhythm(analysed, name):
+    """A steady kick-and-hats section should read as a strong beat, not as middling."""
+    clip = analysed[name]
+    scores = [s["rhythm"] for s in clip.document["descriptors"]["perSection"]]
+    with_kick = [scores[i] for i, parts in enumerate(section_parts(clip)) if "kick" in parts]
+    assert min(with_kick) >= 0.8, with_kick
+
+
 def test_bassline_adds_bass(analysed):
     clip = analysed["house_124_a_minor"]
     scores = [s["bass"] for s in clip.document["descriptors"]["perSection"]]
