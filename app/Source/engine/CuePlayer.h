@@ -7,10 +7,8 @@
 #include <vector>
 
 #include <juce_audio_basics/juce_audio_basics.h>
-#include <juce_audio_devices/juce_audio_devices.h>
 
 #include "CueMode.h"
-#include "OutputRouting.h"
 
 namespace djmix
 {
@@ -33,10 +31,12 @@ struct DecodedAudio
 // as its CueMode says.
 //
 // Threads: play, stop and the setters are for the message thread; commands
-// reach the audio thread through a lock-free FIFO. The audio thread never
-// allocates, locks or frees: decoded audio stays owned here, on the message
-// thread, until releaseUnused() finds the audio thread no longer uses it.
-class CuePlayer final : public juce::AudioIODeviceCallback
+// reach the audio thread through a lock-free FIFO. The audio thread (the
+// AudioEngine, which routes the Cue bus to its outputs) calls prepare,
+// render and stopped; it never allocates, locks or frees: decoded audio stays
+// owned here, on the message thread, until releaseUnused() finds the audio
+// thread no longer uses it.
+class CuePlayer final
 {
 public:
     static constexpr double fadeSeconds = 0.005;
@@ -49,7 +49,7 @@ public:
     };
 
     CuePlayer();
-    ~CuePlayer() override;
+    ~CuePlayer();
 
     // Plays [startSeconds, endSeconds) of `audio` (to the end if endSeconds
     // is not after startSeconds), replacing whatever is playing. `tag` comes
@@ -66,11 +66,6 @@ public:
 
     void setGain (float linearGain) { gain.store (linearGain); }
     float getGain() const { return gain.load(); }
-    void setRouting (const OutputRouting& routing);
-    OutputRouting routing() const;
-
-    // Where Cue goes on the running device, after any fallback to split cue.
-    ResolvedRouting resolvedRouting() const { return resolveRouting (routing(), activeOutputs.load()); }
 
     State state() const;
     bool isDeviceRunning() const { return deviceRunning.load(); }
@@ -78,18 +73,11 @@ public:
     // Frees decoded audio the audio thread has finished with.
     void releaseUnused();
 
-    // juce::AudioIODeviceCallback (audio thread)
-    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
-                                           int numInputChannels,
-                                           float* const* outputChannelData,
-                                           int numOutputChannels,
-                                           int numSamples,
-                                           const juce::AudioIODeviceCallbackContext& context) override;
-    void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
-    void audioDeviceStopped() override;
-
-    // For tests: what aboutToStart takes from a device.
-    void prepare (double deviceSampleRate, uint64_t activeOutputChannels, int maxBlockSize);
+    // Audio thread: before the device starts, each block (writing the Cue
+    // bus, gain applied, over whatever is in left and right), and after it stops.
+    void prepare (double deviceSampleRate, int maxBlockSize);
+    void render (float* left, float* right, int numSamples);
+    void stopped();
 
 private:
     struct Command
@@ -145,12 +133,7 @@ private:
     double rate = 0.0;
 
     // Shared.
-    std::atomic<double> deviceRate { 0.0 };
-    std::atomic<uint64_t> activeOutputs { 0 };
     std::atomic<bool> deviceRunning { false };
-    std::atomic<int> masterFirst { 0 };
-    std::atomic<int> cueFirst { 2 };
-    std::atomic<bool> splitCue { false };
     std::atomic<float> gain { 1.0f };
 
     std::atomic<bool> stateIsPlaying { false };

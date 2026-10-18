@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <climits>
 
-#include "RealtimeGuard.h"
 
 namespace djmix
 {
@@ -11,15 +10,6 @@ namespace djmix
 namespace
 {
 constexpr int defaultMaxBlock = 4096;
-
-uint64_t toMask (const juce::BigInteger& bits)
-{
-    uint64_t mask = 0;
-    for (int i = 0; i < 64; ++i)
-        if (bits[i])
-            mask |= uint64_t { 1 } << i;
-    return mask;
-}
 } // namespace
 
 CuePlayer::CuePlayer() = default;
@@ -88,22 +78,6 @@ void CuePlayer::push (const Command& command)
         commands[static_cast<size_t> (scope.startIndex2)] = command;
 }
 
-void CuePlayer::setRouting (const OutputRouting& r)
-{
-    masterFirst.store (r.masterFirst);
-    cueFirst.store (r.cueFirst);
-    splitCue.store (r.splitCue);
-}
-
-OutputRouting CuePlayer::routing() const
-{
-    OutputRouting r;
-    r.masterFirst = masterFirst.load();
-    r.cueFirst = cueFirst.load();
-    r.splitCue = splitCue.load();
-    return r;
-}
-
 CuePlayer::State CuePlayer::state() const
 {
     State s;
@@ -129,12 +103,10 @@ void CuePlayer::releaseUnused()
 //==============================================================================
 // Audio thread
 
-void CuePlayer::prepare (double deviceSampleRate, uint64_t activeOutputChannels, int maxBlockSize)
+void CuePlayer::prepare (double deviceSampleRate, int maxBlockSize)
 {
     rate = deviceSampleRate;
-    deviceRate.store (deviceSampleRate);
-    activeOutputs.store (activeOutputChannels);
-    scratch.setSize (4, std::max (maxBlockSize, defaultMaxBlock));
+    scratch.setSize (2, std::max (maxBlockSize, defaultMaxBlock));
 
     // Anything queued while no device ran is stale.
     {
@@ -154,13 +126,7 @@ void CuePlayer::prepare (double deviceSampleRate, uint64_t activeOutputChannels,
     deviceRunning.store (true);
 }
 
-void CuePlayer::audioDeviceAboutToStart (juce::AudioIODevice* device)
-{
-    prepare (device->getCurrentSampleRate(), toMask (device->getActiveOutputChannels()),
-             device->getCurrentBufferSizeSamples());
-}
-
-void CuePlayer::audioDeviceStopped()
+void CuePlayer::stopped()
 {
     deviceRunning.store (false);
     for (auto& v : voices)
@@ -329,18 +295,10 @@ void CuePlayer::publishState()
     inUse[1].store (voices[1].audio);
 }
 
-void CuePlayer::audioDeviceIOCallbackWithContext (const float* const*,
-                                                  int,
-                                                  float* const* outputs,
-                                                  int numOutputs,
-                                                  int numSamples,
-                                                  const juce::AudioIODeviceCallbackContext&)
+void CuePlayer::render (float* left, float* right, int numSamples)
 {
-    rt::ScopedRealtimeThread realtime;
-
-    for (int ch = 0; ch < numOutputs; ++ch)
-        if (outputs[ch] != nullptr)
-            juce::FloatVectorOperations::clear (outputs[ch], numSamples);
+    juce::FloatVectorOperations::clear (left, numSamples);
+    juce::FloatVectorOperations::clear (right, numSamples);
 
     handleCommands();
     if (rate <= 0.0 || (! voices[0].active() && ! voices[1].active()))
@@ -348,10 +306,6 @@ void CuePlayer::audioDeviceIOCallbackWithContext (const float* const*,
         publishState();
         return;
     }
-
-    const auto routes = resolveRouting (routing(), activeOutputs.load());
-    const float cueGain = gain.load();
-    auto output = [&] (int index) -> float* { return index >= 0 && index < numOutputs ? outputs[index] : nullptr; };
 
     // In chunks no longer than the scratch buffer, and split where a looping
     // audition goes back to its start, so the loop is sample-accurate.
@@ -370,40 +324,22 @@ void CuePlayer::audioDeviceIOCallbackWithContext (const float* const*,
             n = std::min (n, untilLoop);
         }
 
-        float* mixL = scratch.getWritePointer (0);
-        float* mixR = scratch.getWritePointer (1);
-        float* voiceL = scratch.getWritePointer (2);
-        float* voiceR = scratch.getWritePointer (3);
-        juce::FloatVectorOperations::clear (mixL, n);
-        juce::FloatVectorOperations::clear (mixR, n);
-
+        float* voiceL = scratch.getWritePointer (0);
+        float* voiceR = scratch.getWritePointer (1);
         for (auto& v : voices)
         {
             if (! v.active())
                 continue;
             renderVoice (v, voiceL, voiceR, n);
-            juce::FloatVectorOperations::add (mixL, voiceL, n);
-            juce::FloatVectorOperations::add (mixR, voiceR, n);
-        }
-
-        if (routes.split)
-        {
-            if (auto* out = output (routes.cueLeft))
-            {
-                juce::FloatVectorOperations::addWithMultiply (out + done, mixL, 0.5f * cueGain, n);
-                juce::FloatVectorOperations::addWithMultiply (out + done, mixR, 0.5f * cueGain, n);
-            }
-        }
-        else
-        {
-            if (auto* out = output (routes.cueLeft))
-                juce::FloatVectorOperations::addWithMultiply (out + done, mixL, cueGain, n);
-            if (auto* out = output (routes.cueRight))
-                juce::FloatVectorOperations::addWithMultiply (out + done, mixR, cueGain, n);
+            juce::FloatVectorOperations::add (left + done, voiceL, n);
+            juce::FloatVectorOperations::add (right + done, voiceR, n);
         }
         done += n;
     }
 
+    const float cueGain = gain.load();
+    juce::FloatVectorOperations::multiply (left, cueGain, numSamples);
+    juce::FloatVectorOperations::multiply (right, cueGain, numSamples);
     publishState();
 }
 

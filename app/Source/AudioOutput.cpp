@@ -11,24 +11,24 @@ AudioOutput::AudioOutput (AppSettings& s)
 
     if (const auto routing = settings.outputRouting())
     {
-        cuePlayer.setRouting (*routing);
+        audioEngine.setRouting (*routing);
         routingChosen = true;
     }
     else
     {
-        cuePlayer.setRouting (OutputRouting::defaultFor (numOutputs()));
+        audioEngine.setRouting (OutputRouting::defaultFor (numOutputs()));
     }
-    cuePlayer.setGain (settings.cueVolume());
+    audioEngine.cue().setGain (settings.cueVolume());
 
     enableNeededChannels();
-    deviceManager.addAudioCallback (&cuePlayer);
+    deviceManager.addAudioCallback (&audioEngine);
     deviceManager.addChangeListener (this);
 }
 
 AudioOutput::~AudioOutput()
 {
     deviceManager.removeChangeListener (this);
-    deviceManager.removeAudioCallback (&cuePlayer);
+    deviceManager.removeAudioCallback (&audioEngine);
     deviceManager.closeAudioDevice();
 }
 
@@ -48,7 +48,7 @@ int AudioOutput::numOutputs() const
 
 void AudioOutput::setRouting (const OutputRouting& routing)
 {
-    cuePlayer.setRouting (routing);
+    audioEngine.setRouting (routing);
     routingChosen = true;
     settings.setOutputRouting (routing);
     enableNeededChannels();
@@ -56,7 +56,7 @@ void AudioOutput::setRouting (const OutputRouting& routing)
 
 void AudioOutput::setCueVolume (float gain)
 {
-    cuePlayer.setGain (gain);
+    audioEngine.cue().setGain (gain);
     settings.setCueVolume (gain);
 }
 
@@ -65,7 +65,7 @@ void AudioOutput::changeListenerCallback (juce::ChangeBroadcaster*)
     // A device the user picked in Settings: until a routing is chosen, follow
     // the new device's default.
     if (! routingChosen)
-        cuePlayer.setRouting (OutputRouting::defaultFor (numOutputs()));
+        audioEngine.setRouting (OutputRouting::defaultFor (numOutputs()));
     enableNeededChannels();
 
     const auto state = deviceManager.createStateXml();
@@ -80,7 +80,7 @@ void AudioOutput::enableNeededChannels()
 
     auto setup = deviceManager.getAudioDeviceSetup();
     const auto available = device->getOutputChannelNames().size();
-    const auto needed = channelsNeeded (cuePlayer.routing());
+    const auto needed = channelsNeeded (audioEngine.routing());
 
     bool changed = false;
     for (int ch = 0; ch < std::min (available, 64); ++ch)

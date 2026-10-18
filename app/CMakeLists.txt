@@ -8,6 +8,8 @@ add_library(djmix_core STATIC
     Source/analysis/WaveformFile.cpp
     Source/analysis/AnalyzerProtocol.h
     Source/analysis/AnalyzerProtocol.cpp
+    Source/io/ProjectFile.h
+    Source/io/ProjectFile.cpp
     Source/engine/Mp3Gapless.h
     Source/engine/Mp3Gapless.cpp
     Source/engine/OutputRouting.h
@@ -26,6 +28,10 @@ add_library(djmix_core STATIC
     Source/library/TrackColours.cpp
     Source/library/TrackOverrides.h
     Source/library/TrackOverrides.cpp
+    Source/model/BeatMap.h
+    Source/model/BeatMap.cpp
+    Source/model/Project.h
+    Source/model/Project.cpp
     Source/view/EffectiveAnalysis.h
     Source/view/EffectiveAnalysis.cpp
     Source/view/TapTempo.h
@@ -57,10 +63,21 @@ endif()
 set(DJMIX_SERVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ArrangementPlayer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ArrangementPlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AudioEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AudioEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AuditionController.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AuditionController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ClipRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ClipRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/CuePlayer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/CuePlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/MasterPlayer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/MasterPlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/PlaybackSnapshot.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/RenderCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/RenderCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/TrackDecoder.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/TrackDecoder.cpp
 )
@@ -110,6 +127,7 @@ target_compile_definitions(DJMixer PRIVATE
 target_link_libraries(DJMixer
     PRIVATE
         djmix_core
+        rubberband
         juce::juce_audio_utils
         juce::juce_data_structures
         juce::juce_audio_formats

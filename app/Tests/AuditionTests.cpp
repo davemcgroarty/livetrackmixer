@@ -10,12 +10,14 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include "PostQueue.h"
 #include "analysis/AnalyzerProtocol.h"
 #include "engine/AuditionController.h"
 #include "engine/TrackDecoder.h"
 #include "library/LibraryDatabase.h"
 
 using Catch::Approx;
+using djmix::test::PostQueue;
 using djmix::AuditionController;
 using djmix::CuePlayer;
 using djmix::TrackDecoder;
@@ -59,46 +61,10 @@ fs::path writeWav (const TempDir& temp, const char* name, double rate, double se
     return path;
 }
 
-// Collects what the controller posts to the "message thread", for the test to run.
-struct PostQueue
-{
-    std::mutex mutex;
-    std::condition_variable posted;
-    std::deque<std::function<void()>> queue;
-
-    AuditionController::Post poster()
-    {
-        return [this] (std::function<void()> f)
-        {
-            {
-                std::lock_guard lock (mutex);
-                queue.push_back (std::move (f));
-            }
-            posted.notify_all();
-        };
-    }
-
-    // Runs what has been posted, waiting up to `seconds` for something.
-    bool runNext (double seconds = 10.0)
-    {
-        std::function<void()> f;
-        {
-            std::unique_lock lock (mutex);
-            if (! posted.wait_for (lock, std::chrono::duration<double> (seconds), [this] { return ! queue.empty(); }))
-                return false;
-            f = std::move (queue.front());
-            queue.pop_front();
-        }
-        f();
-        return true;
-    }
-};
-
 void renderBlock (CuePlayer& player, int samples = 512)
 {
-    std::vector<float> data (static_cast<size_t> (4 * samples));
-    float* channels[] = { data.data(), data.data() + samples, data.data() + 2 * samples, data.data() + 3 * samples };
-    player.audioDeviceIOCallbackWithContext (nullptr, 0, channels, 4, samples, {});
+    std::vector<float> data (static_cast<size_t> (2 * samples));
+    player.render (data.data(), data.data() + samples, samples);
 }
 } // namespace
 
@@ -161,7 +127,7 @@ TEST_CASE ("Auditions decode in the background and then play", "[audio][audition
     const auto b = writeWav (temp, "b.wav", 44100.0, 2.0, 2, 880.0);
 
     CuePlayer player;
-    player.prepare (44100.0, 0b1111, 512);
+    player.prepare (44100.0, 512);
     PostQueue queue;
     AuditionController audition (player, queue.poster());
 
@@ -222,7 +188,7 @@ TEST_CASE ("An audition that cannot play says why", "[audio][audition]")
 {
     TempDir temp;
     CuePlayer player;
-    player.prepare (44100.0, 0b1111, 512);
+    player.prepare (44100.0, 512);
     PostQueue queue;
     AuditionController audition (player, queue.poster());
 

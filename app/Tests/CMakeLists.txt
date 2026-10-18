@@ -10,6 +10,7 @@ add_executable(djmix_tests
     LibraryTests.cpp
     Mp3GaplessTests.cpp
     OutputRoutingTests.cpp
+    ProjectTests.cpp
     WaveformFileTests.cpp
     RealtimeGuardTests.cpp
     ViewTests.cpp
@@ -48,14 +49,22 @@ juce_add_console_app(djmix_app_tests PRODUCT_NAME "djmix_app_tests")
 target_sources(djmix_app_tests PRIVATE
     ${DJMIX_SERVICE_SOURCES}
     ${DJMIX_VIEW_SOURCES}
+    AllocationCounter.h
+    AllocationCounter.cpp
     AnalyzerRunnerTests.cpp
+    ArrangementTests.cpp
     AuditionTests.cpp
+    ClipRendererTests.cpp
     CuePlayerTests.cpp
+    MasterPlayerTests.cpp
+    PostQueue.h
+    SyntheticAudio.h
     TrackViewTests.cpp
 )
 target_include_directories(djmix_app_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(djmix_app_tests PRIVATE
     djmix_core
+    rubberband
     juce::juce_audio_devices
     juce::juce_audio_formats
     juce::juce_gui_basics

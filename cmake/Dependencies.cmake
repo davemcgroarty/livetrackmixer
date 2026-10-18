@@ -46,3 +46,16 @@ if(DJMIX_BUILD_TESTS)
         OPTIONS "JSON_VALIDATOR_BUILD_TESTS OFF" "JSON_VALIDATOR_BUILD_EXAMPLES OFF" "JSON_VALIDATOR_INSTALL OFF"
     )
 endif()
+
+if(DJMIX_BUILD_APP)
+    # Time-stretching for the render cache: Rubber Band Library, GPL v2 or later
+    # (compatible with the app's AGPLv3). Built from its single-file source.
+    CPMAddPackage(
+        NAME rubberband
+        GITHUB_REPOSITORY breakfastquay/rubberband
+        GIT_TAG v4.0.0
+        VERSION 4.0.0
+        DOWNLOAD_ONLY YES
+    )
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/rubberband ${CMAKE_BINARY_DIR}/rubberband)
+endif()

@@ -197,7 +197,7 @@ void SettingsComponent::refreshRouting()
     }
     else
     {
-        const auto resolved = audio.cue().resolvedRouting();
+        const auto resolved = audio.engine().resolvedRouting();
         if (resolved.split && ! routing.splitCue)
             text = "Outputs " + juce::String (pairName (routing.cueFirst))
                    + " are not available, so Cue plays in mono on the left of the Master pair and Master on the right.";

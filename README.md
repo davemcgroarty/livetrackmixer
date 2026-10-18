@@ -12,7 +12,8 @@ The repo has two parts that share only files on disk:
   subprocess and reads its output.
 
 `schemas/analysis.v1.schema.json` is the contract between them. Both test suites
-validate against it.
+validate against it. `schemas/project.v1.schema.json` describes the app's
+`.djmix` project files.
 
 ## Status
 
@@ -24,7 +25,9 @@ validate against it.
 | M2b · Track view: waveform, beat/bar/phrase grid, sections, content cells | Done |
 | M2c · Audition on Cue: sections, phrases and tracks; Master/Cue routing | Done |
 | M3 · Grid and section editing, saved as overrides, with undo | Done |
-| M4 · Arrangement playback | Next |
+| M4a · Arrangement engine: project model and `.djmix` files, Rubber Band render cache, Master playback | Done |
+| M4b · Arrangement view: timeline, layers, clips, snapping, transport | Next |
+| M4c · Cue on layer and look-ahead cue | Not started |
 | M5–M6 | Not started |
 
 On the synthetic test clips, BPM is within ±0.02 and downbeats are within 13 ms
@@ -162,7 +165,8 @@ Master and Cue, and the Cue volume. **Test cue** beeps on the Cue outputs.
 - On a stereo device, or with **Split** chosen, Cue plays in mono on the left
   and Master in mono on the right, for practising on one pair of headphones.
 
-Master is silent until the Arrangement arrives in M4.
+Master plays the arrangement once the Arrangement view arrives in M4b; until
+then it is silent.
 
 When the app finds a newer (or different) `djanalyze` than the one that
 analysed a track, it analyses the track again in the background; the old
@@ -173,8 +177,10 @@ track number dropped); reading tags is a later step. The library is a SQLite
 file in the app's data folder (**Settings...** shows where), next to the
 analysis cache.
 
-CPM.cmake fetches JUCE, SQLiteCpp, nlohmann/json, Catch2 and json-schema-validator at
-configure time. Set `CPM_SOURCE_CACHE=~/.cache/CPM` to reuse the downloads.
+CPM.cmake fetches JUCE, Rubber Band, SQLiteCpp, nlohmann/json, Catch2 and
+json-schema-validator at configure time. Rubber Band is always compiled with
+optimisation, even in Debug builds, because unoptimised time-stretching is
+too slow to use. Set `CPM_SOURCE_CACHE=~/.cache/CPM` to reuse the downloads.
 Configure with `-DDJMIX_BUILD_APP=OFF` to build only the tests, without JUCE.
 
 On Linux, JUCE needs `libasound2-dev libfreetype-dev libfontconfig1-dev
@@ -197,6 +203,16 @@ The Cue player is tested by calling its audio callback directly, with no
 device. The tests check routing, fades (no clicks on start, stop, switch or the
 end of a range), resampling, and that decoded audio is only freed off the audio
 thread. They also replace `operator new` to check the callback never allocates.
+
+The arrangement engine is tested the same way, offline. Its main test is the M4
+goal: two 124 BPM click tracks on two layers at a 128 BPM project tempo, played
+for five minutes. Each of the 640 clicks must land within 3 ms of its beat on
+the project grid, and the two layers within 3 ms of each other. The last minute
+must be no further off than the first. (Measured: 0.07–1.35 ms, 0.02 ms of
+drift, layers within 0.73 ms.) Rendering the two tracks takes about 30 seconds.
+Other tests check that new snapshots, seeks, pauses and back-to-back clips
+never click, and that a clip plays a stand-in on the beat while it is
+re-rendered after a tempo change.
 
 The analyzer runner is tested against `fake_djanalyze`, a small stand-in built
 with the tests. Set `DJMIX_DJANALYZE` to a real `djanalyze` to also run it

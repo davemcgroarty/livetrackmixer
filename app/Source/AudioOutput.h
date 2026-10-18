@@ -3,7 +3,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include "AppSettings.h"
-#include "engine/CuePlayer.h"
+#include "engine/AudioEngine.h"
 
 namespace djmix
 {
@@ -18,7 +18,9 @@ public:
     ~AudioOutput() override;
 
     juce::AudioDeviceManager& devices() { return deviceManager; }
-    CuePlayer& cue() { return cuePlayer; }
+    AudioEngine& engine() { return audioEngine; }
+    CuePlayer& cue() { return audioEngine.cue(); }
+    MasterPlayer& master() { return audioEngine.master(); }
 
     bool isOpen() const { return deviceManager.getCurrentAudioDevice() != nullptr; }
     juce::String deviceName() const;
@@ -27,10 +29,10 @@ public:
     // Why no device opened, if none did.
     const juce::String& openError() const { return error; }
 
-    OutputRouting routing() const { return cuePlayer.routing(); }
+    OutputRouting routing() const { return audioEngine.routing(); }
     void setRouting (const OutputRouting& routing);
 
-    float cueVolume() const { return cuePlayer.getGain(); }
+    float cueVolume() const { return audioEngine.cue().getGain(); }
     void setCueVolume (float gain);
 
 private:
@@ -39,7 +41,7 @@ private:
 
     AppSettings& settings;
     juce::AudioDeviceManager deviceManager;
-    CuePlayer cuePlayer;
+    AudioEngine audioEngine;
     juce::String error;
     bool routingChosen = false;
 
