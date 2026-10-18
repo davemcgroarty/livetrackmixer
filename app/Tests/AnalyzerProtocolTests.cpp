@@ -85,6 +85,10 @@ TEST_CASE ("findOnPath finds programs in folders with non-ASCII names", "[analyz
 
     const auto found = djmix::findOnPath ("djmix-find-test");
     const auto missing = djmix::findOnPath ("djmix-no-such-program");
+    // The same file, whatever case the name came back in: Windows takes the
+    // extension from PATHEXT, which lists ".EXE".
+    std::error_code error;
+    const bool same = found && fs::equivalent (*found, program, error);
 
 #ifdef _WIN32
     _wputenv_s (L"PATH", saved.c_str());
@@ -94,6 +98,6 @@ TEST_CASE ("findOnPath finds programs in folders with non-ASCII names", "[analyz
     fs::remove_all (dir);
 
     REQUIRE (found.has_value());
-    CHECK (*found == program);
+    CHECK (same);
     CHECK_FALSE (missing.has_value());
 }
