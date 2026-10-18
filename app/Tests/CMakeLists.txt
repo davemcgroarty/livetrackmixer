@@ -6,6 +6,8 @@ add_executable(djmix_tests
     AnalysisSchemaTests.cpp
     AnalyzerProtocolTests.cpp
     LibraryTests.cpp
+    Mp3GaplessTests.cpp
+    OutputRoutingTests.cpp
     WaveformFileTests.cpp
     RealtimeGuardTests.cpp
     ViewTests.cpp
@@ -45,16 +47,21 @@ target_sources(djmix_app_tests PRIVATE
     ${DJMIX_SERVICE_SOURCES}
     ${DJMIX_VIEW_SOURCES}
     AnalyzerRunnerTests.cpp
+    AuditionTests.cpp
+    CuePlayerTests.cpp
     TrackViewTests.cpp
 )
 target_include_directories(djmix_app_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(djmix_app_tests PRIVATE
     djmix_core
+    juce::juce_audio_devices
+    juce::juce_audio_formats
     juce::juce_gui_basics
     Catch2::Catch2WithMain
 )
 target_compile_definitions(djmix_app_tests PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+    JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
     JUCE_STANDALONE_APPLICATION=1

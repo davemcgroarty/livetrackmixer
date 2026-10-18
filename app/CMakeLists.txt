@@ -8,6 +8,10 @@ add_library(djmix_core STATIC
     Source/analysis/WaveformFile.cpp
     Source/analysis/AnalyzerProtocol.h
     Source/analysis/AnalyzerProtocol.cpp
+    Source/engine/Mp3Gapless.h
+    Source/engine/Mp3Gapless.cpp
+    Source/engine/OutputRouting.h
+    Source/engine/OutputRouting.cpp
     Source/engine/RealtimeGuard.h
     Source/engine/RealtimeGuard.cpp
     Source/library/Camelot.h
@@ -47,6 +51,12 @@ endif()
 set(DJMIX_SERVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AuditionController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AuditionController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/CuePlayer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/CuePlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/TrackDecoder.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/TrackDecoder.cpp
 )
 set(DJMIX_SERVICE_SOURCES ${DJMIX_SERVICE_SOURCES} PARENT_SCOPE) # for app/Tests
 
@@ -70,6 +80,8 @@ target_sources(DJMixer PRIVATE
     Source/Main.cpp
     Source/AppSettings.h
     Source/AppSettings.cpp
+    Source/AudioOutput.h
+    Source/AudioOutput.cpp
     Source/library/LibraryController.h
     Source/library/LibraryController.cpp
     Source/ui/LibraryPanel.h
@@ -81,6 +93,7 @@ target_sources(DJMixer PRIVATE
 )
 
 target_compile_definitions(DJMixer PRIVATE
+    JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:DJMixer,JUCE_PRODUCT_NAME>"

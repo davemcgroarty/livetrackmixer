@@ -179,6 +179,9 @@ TEST_CASE ("TrackStructure finds bars, sections and phrase starts", "[view]")
     CHECK (s.startsPhrase (8));
     CHECK (s.startsPhrase (56));
     CHECK_FALSE (s.startsPhrase (64));
+    CHECK (s.phraseAround (0) == std::pair (0, 7));
+    CHECK (s.phraseAround (13) == std::pair (8, 15));
+    CHECK (s.phraseAround (63) == std::pair (56, 63));
     CHECK (s.startsSection (16));
     CHECK_FALSE (s.startsSection (8));
 }

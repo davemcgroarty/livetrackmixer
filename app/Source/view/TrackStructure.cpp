@@ -65,6 +65,18 @@ bool TrackStructure::startsPhrase (int bar) const
     return bar >= 0 && static_cast<size_t> (bar) < phraseStarts.size() && phraseStarts[static_cast<size_t> (bar)];
 }
 
+std::pair<int, int> TrackStructure::phraseAround (int bar) const
+{
+    for (const auto& p : analysis.phrases)
+    {
+        const int first = p.startBar - 1;
+        if (bar >= first && bar < first + p.lengthBars)
+            return { first, std::min (first + p.lengthBars, numBars()) - 1 };
+    }
+    const int first = bar - bar % 8;
+    return { first, std::min (first + 8, std::max (numBars(), bar + 1)) - 1 };
+}
+
 bool TrackStructure::startsSection (int bar) const
 {
     return bar >= 0 && static_cast<size_t> (bar) < sectionStarts.size() && sectionStarts[static_cast<size_t> (bar)];

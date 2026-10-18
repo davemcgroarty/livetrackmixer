@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -18,6 +19,10 @@ namespace djmix
 // section boundaries, per-bar bass and high-end blocks in the track colour,
 // and the waveform's contrast set by each bar's rhythm score. Hovering shows
 // a bar's (or, over the section strip, a section's) four content scores.
+//
+// Clicking a section in the strip, or a phrase in the waveform, asks for it to
+// be auditioned on Cue (onAudition); clicking it again, the Stop button or Esc
+// stops (onStopAudition). setAudition() shows what is playing.
 //
 // Mouse wheel or pinch zooms around the pointer, shift-wheel or a sideways
 // swipe scrolls, dragging pans; + and - zoom, Home shows the whole track.
@@ -43,6 +48,25 @@ public:
     // Clears the view and shows `message` in its place.
     void showMessage (const juce::String& message);
 
+    // An audition of this track on Cue, as the view shows it.
+    struct Audition
+    {
+        double start = 0.0;
+        double end = 0.0; // 0: to the end of the track
+        double position = 0.0;
+        bool playing = false;
+        bool loading = false;
+        juce::String error;
+
+        bool operator== (const Audition&) const = default;
+    };
+
+    std::function<void (double start, double end)> onAudition;
+    std::function<void()> onStopAudition;
+
+    // What is auditioning now; nothing when this track is not.
+    void setAudition (std::optional<Audition> audition);
+
     bool hasAnalysis() const { return loaded; }
     const ViewRange& viewRange() const { return range; }
     void showRange (double start, double span);
@@ -55,7 +79,6 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
-    void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
     bool keyPressed (const juce::KeyPress&) override;
@@ -83,7 +106,11 @@ private:
     void paintWaveform (juce::Graphics&, juce::Rectangle<int> area);
     void paintGrid (juce::Graphics&, juce::Rectangle<int> area);
     void paintHover (juce::Graphics&);
+    void paintAudition (juce::Graphics&);
 
+    void handleClick (juce::Point<float> position);
+    void requestAudition (double start, double end);
+    juce::Rectangle<int> playheadArea (const Audition&) const;
     float timeToX (double seconds) const;
 
     std::optional<Shown> shown;
@@ -98,6 +125,9 @@ private:
 
     juce::Rectangle<int> headerArea, stripArea, waveArea;
     juce::ScrollBar scrollBar { false };
+
+    std::optional<Audition> audition;
+    juce::Rectangle<int> stopButtonArea;
 
     std::optional<juce::Point<float>> hover;
     double dragAnchorTime = 0.0;

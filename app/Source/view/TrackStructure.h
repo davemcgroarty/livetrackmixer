@@ -1,5 +1,6 @@
 #pragma once
 
+#include <utility>
 #include <vector>
 
 #include "analysis/Analysis.h"
@@ -35,6 +36,10 @@ public:
     int numBars() const { return static_cast<int> (analysis.bars.size()); }
 
     bool startsPhrase (int bar) const;
+
+    // The first and last bar (0-based, inclusive) of the phrase holding `bar`:
+    // from the analysis, or the 8-bar block around it if no phrase covers it.
+    std::pair<int, int> phraseAround (int bar) const;
     bool startsSection (int bar) const;
 
     // Seconds per beat (median, for variable-tempo tracks too).

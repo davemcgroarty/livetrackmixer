@@ -355,6 +355,12 @@ void LibraryPanel::cellClicked (int row, int, const juce::MouseEvent& event)
     }
 }
 
+void LibraryPanel::cellDoubleClicked (int row, int, const juce::MouseEvent&)
+{
+    if (row >= 0 && row < getNumRows() && onAuditionTrack)
+        onAuditionTrack (rows[static_cast<size_t> (row)].id);
+}
+
 void LibraryPanel::selectedRowsChanged (int)
 {
     if (! updatingSelection && onSelectionChanged)

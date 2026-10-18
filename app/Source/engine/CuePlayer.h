@@ -1,0 +1,154 @@
+#pragma once
+
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_audio_devices/juce_audio_devices.h>
+
+#include "OutputRouting.h"
+
+namespace djmix
+{
+
+// A track decoded into memory: stereo float samples at the file's own rate.
+struct DecodedAudio
+{
+    juce::AudioBuffer<float> samples; // two channels
+    double sampleRate = 44100.0;
+
+    double duration() const { return sampleRate > 0 ? samples.getNumSamples() / sampleRate : 0.0; }
+};
+
+// Plays auditions on the Cue bus: a stretch of a decoded track, resampled to
+// the device rate, faded in and out over a few milliseconds so starts, stops
+// and switches never click. Nothing it plays reaches Master.
+//
+// Threads: play, stop and the setters are for the message thread; commands
+// reach the audio thread through a lock-free FIFO. The audio thread never
+// allocates, locks or frees: decoded audio stays owned here, on the message
+// thread, until releaseUnused() finds the audio thread no longer uses it.
+class CuePlayer final : public juce::AudioIODeviceCallback
+{
+public:
+    static constexpr double fadeSeconds = 0.005;
+
+    struct State
+    {
+        bool playing = false;
+        uint64_t tag = 0;      // the tag given to play()
+        double position = 0.0; // seconds into the track
+    };
+
+    CuePlayer();
+    ~CuePlayer() override;
+
+    // Plays [startSeconds, endSeconds) of `audio` (to the end if endSeconds
+    // is not after startSeconds), replacing whatever is playing. `tag` comes
+    // back in state(). Returns false if no device is running.
+    bool play (std::shared_ptr<const DecodedAudio> audio, double startSeconds, double endSeconds, uint64_t tag);
+    void stop();
+
+    void setGain (float linearGain) { gain.store (linearGain); }
+    float getGain() const { return gain.load(); }
+    void setRouting (const OutputRouting& routing);
+    OutputRouting routing() const;
+
+    // Where Cue goes on the running device, after any fallback to split cue.
+    ResolvedRouting resolvedRouting() const { return resolveRouting (routing(), activeOutputs.load()); }
+
+    State state() const;
+    bool isDeviceRunning() const { return deviceRunning.load(); }
+
+    // Frees decoded audio the audio thread has finished with.
+    void releaseUnused();
+
+    // juce::AudioIODeviceCallback (audio thread)
+    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                           int numInputChannels,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext& context) override;
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
+    void audioDeviceStopped() override;
+
+    // For tests: what aboutToStart takes from a device.
+    void prepare (double deviceSampleRate, uint64_t activeOutputChannels, int maxBlockSize);
+
+private:
+    struct Command
+    {
+        enum class Type
+        {
+            play,
+            stop
+        };
+        Type type = Type::stop;
+        const DecodedAudio* audio = nullptr;
+        double startSeconds = 0.0;
+        double endSeconds = 0.0;
+        uint64_t tag = 0;
+        uint64_t serial = 0;
+    };
+
+    struct Voice
+    {
+        const DecodedAudio* audio = nullptr;
+        int64_t readIndex = 0; // next source frame the interpolators read
+        int64_t endIndex = 0;
+        float fade = 0.0f;     // current fade gain
+        float fadeTarget = 0.0f;
+        uint64_t tag = 0;
+        std::array<juce::LagrangeInterpolator, 2> interpolators;
+
+        bool active() const { return audio != nullptr; }
+    };
+
+    void push (const Command& command);
+    void handleCommands();
+    void startVoice (const Command& command);
+    void renderVoice (Voice& voice, float* left, float* right, int numSamples);
+    void publishState();
+
+    static constexpr int commandCapacity = 64;
+    std::array<Command, commandCapacity> commands {};
+    juce::AbstractFifo fifo { commandCapacity };
+
+    // Audio thread only.
+    std::array<Voice, 2> voices; // the current one, and one fading out after a switch
+    int current = 0;
+    juce::AudioBuffer<float> scratch;
+    double rate = 0.0;
+
+    // Shared.
+    std::atomic<double> deviceRate { 0.0 };
+    std::atomic<uint64_t> activeOutputs { 0 };
+    std::atomic<bool> deviceRunning { false };
+    std::atomic<int> masterFirst { 0 };
+    std::atomic<int> cueFirst { 2 };
+    std::atomic<bool> splitCue { false };
+    std::atomic<float> gain { 1.0f };
+
+    std::atomic<bool> stateIsPlaying { false };
+    std::atomic<uint64_t> stateTag { 0 };
+    std::atomic<double> statePosition { 0.0 };
+    std::array<std::atomic<const DecodedAudio*>, 2> inUse {};
+    std::atomic<uint64_t> lastConsumed { 0 };
+
+    // Message thread only.
+    uint64_t nextSerial = 1;
+    struct Owned
+    {
+        uint64_t serial;
+        std::shared_ptr<const DecodedAudio> audio;
+    };
+    std::vector<Owned> owned;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CuePlayer)
+};
+
+} // namespace djmix

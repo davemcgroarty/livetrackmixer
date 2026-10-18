@@ -241,7 +241,39 @@ void TrackView::paint (juce::Graphics& g)
         g.reduceClipRegion (stripArea);
         paintSectionStrip (g, stripArea);
     }
+    paintAudition (g);
     paintHover (g);
+}
+
+void TrackView::paintAudition (juce::Graphics& g)
+{
+    if (! audition || audition->error.isNotEmpty())
+        return;
+
+    const auto& a = *audition;
+    const double end = a.end > a.start ? a.end : structure.data().durationSec;
+    const float x0 = std::max (timeToX (a.start), static_cast<float> (waveArea.getX()));
+    const float x1 = std::min (timeToX (end), static_cast<float> (waveArea.getRight()));
+    if (x1 > x0)
+    {
+        // The stretch being auditioned: lit in the strip, underlined below it.
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.fillRect (juce::Rectangle<float> (x0, static_cast<float> (stripArea.getY()) + 2.0f, x1 - x0,
+                                            static_cast<float> (stripArea.getHeight()) - 4.0f));
+        g.setColour (juce::Colours::white.withAlpha (0.8f));
+        g.fillRect (juce::Rectangle<float> (x0, static_cast<float> (waveArea.getY()), x1 - x0, 2.0f));
+    }
+
+    if (a.playing)
+    {
+        const float x = timeToX (a.position);
+        if (x >= static_cast<float> (waveArea.getX()) && x <= static_cast<float> (waveArea.getRight()))
+        {
+            g.setColour (juce::Colours::white);
+            g.fillRect (juce::Rectangle<float> (x - 1.0f, static_cast<float> (stripArea.getY()), 2.0f,
+                                                static_cast<float> (waveArea.getBottom() - stripArea.getY())));
+        }
+    }
 }
 
 void TrackView::paintHeader (juce::Graphics& g, juce::Rectangle<int> area)
@@ -270,6 +302,34 @@ void TrackView::paintHeader (juce::Graphics& g, juce::Rectangle<int> area)
         warning = "Check beats";
 
     g.setFont (13.0f);
+
+    // What Cue is doing with this track, rightmost.
+    stopButtonArea = {};
+    if (audition)
+    {
+        if (audition->error.isNotEmpty())
+        {
+            warning = audition->error;
+        }
+        else if (audition->loading || audition->playing)
+        {
+            const juce::String label = audition->loading ? "Loading..." : "Stop cue";
+            const int w = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label) + 30;
+            auto button = area.removeFromRight (w).withSizeKeepingCentre (w, 20);
+            area.removeFromRight (10);
+            g.setColour (juce::Colours::white.withAlpha (audition->playing ? 0.16f : 0.08f));
+            g.fillRoundedRectangle (button.toFloat(), 4.0f);
+            g.setColour (textColour);
+            if (audition->playing)
+            {
+                g.fillRect (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ static_cast<float> (button.getX()) + 13.0f,
+                                                                             static_cast<float> (button.getCentreY()) }));
+                stopButtonArea = button;
+            }
+            g.drawText (label, button.withTrimmedLeft (22), juce::Justification::centredLeft);
+        }
+    }
+
     if (warning.isNotEmpty())
     {
         const int w = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), warning) + 12;
@@ -586,32 +646,89 @@ void TrackView::mouseDrag (const juce::MouseEvent& e)
 
 void TrackView::mouseUp (const juce::MouseEvent& e)
 {
+    const bool wasDrag = dragging;
     dragging = false;
     setMouseCursor (juce::MouseCursor::NormalCursor);
     hover = e.position;
     repaint();
+    if (! wasDrag && e.mouseWasClicked() && ! e.mods.isPopupMenu())
+        handleClick (e.position);
 }
 
-void TrackView::mouseDoubleClick (const juce::MouseEvent& e)
+void TrackView::handleClick (juce::Point<float> position)
 {
+    if (stopButtonArea.toFloat().contains (position))
+    {
+        if (onStopAudition)
+            onStopAudition();
+        return;
+    }
     if (! loaded)
         return;
-    // Whole track, or from there into the phrase under the pointer.
-    if (range.span() < range.duration())
+
+    const double time = range.xToTime (position.x - waveArea.getX());
+    if (stripArea.toFloat().contains (position))
     {
-        range.showAll();
-        rangeChanged();
+        const int section = structure.sectionAt (time);
+        if (section >= 0)
+        {
+            const auto& s = structure.data().sections[static_cast<size_t> (section)];
+            requestAudition (s.start, s.end);
+        }
+    }
+    else if (waveArea.toFloat().contains (position))
+    {
+        const int bar = structure.barAt (time);
+        if (bar >= 0)
+        {
+            const auto [first, last] = structure.phraseAround (bar);
+            requestAudition (structure.barStart (first), structure.barEnd (last));
+        }
+    }
+}
+
+void TrackView::requestAudition (double start, double end)
+{
+    // Clicking what is already playing stops it.
+    const bool same = audition && (audition->playing || audition->loading)
+                      && std::abs (audition->start - start) < 1e-3 && std::abs (audition->end - end) < 1e-3;
+    if (same)
+    {
+        if (onStopAudition)
+            onStopAudition();
+    }
+    else if (onAudition)
+    {
+        onAudition (start, end);
+    }
+}
+
+void TrackView::setAudition (std::optional<Audition> next)
+{
+    if (next == audition)
         return;
-    }
-    const double time = range.xToTime (e.position.x - waveArea.getX());
-    const int bar = std::max (0, structure.barAt (time));
-    const int phraseStart = bar - bar % 8;
-    if (phraseStart < structure.numBars())
+
+    // While only the playhead moves, repaint just where it was and is.
+    const bool onlyMoved = next && audition && juce::exactlyEqual (next->start, audition->start)
+                           && juce::exactlyEqual (next->end, audition->end)
+                           && next->playing == audition->playing && next->loading == audition->loading
+                           && next->error == audition->error;
+    if (onlyMoved && loaded)
     {
-        const double start = structure.barStart (phraseStart);
-        const double end = structure.barEnd (std::min (phraseStart + 7, structure.numBars() - 1));
-        showRange (start - 0.05 * (end - start), 1.1 * (end - start));
+        repaint (playheadArea (*audition));
+        repaint (playheadArea (*next));
     }
+    else
+    {
+        repaint();
+    }
+    audition = std::move (next);
+}
+
+juce::Rectangle<int> TrackView::playheadArea (const Audition& a) const
+{
+    const int x = juce::roundToInt (timeToX (a.position));
+    return { x - 3, stripArea.getY(), 7, waveArea.getBottom() - stripArea.getY() };
 }
 
 void TrackView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
@@ -639,6 +756,12 @@ void TrackView::mouseMagnify (const juce::MouseEvent& e, float scaleFactor)
 
 bool TrackView::keyPressed (const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::escapeKey && audition)
+    {
+        if (onStopAudition)
+            onStopAudition();
+        return true;
+    }
     if (! loaded)
         return false;
     const auto centre = static_cast<float> (waveArea.getCentreX());

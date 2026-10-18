@@ -1,6 +1,8 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "AppSettings.h"
+#include "AudioOutput.h"
+#include "engine/AuditionController.h"
 #include "library/LibraryController.h"
 #include "library/LibraryDatabase.h"
 #include "ui/MainComponent.h"
@@ -41,7 +43,9 @@ public:
         library = std::make_unique<djmix::LibraryController> (openLibrary (*settings),
                                                               settings->analyzerExecutable(),
                                                               settings->analysisCacheDirectory());
-        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *settings, *library);
+        audio = std::make_unique<djmix::AudioOutput> (*settings);
+        audition = std::make_unique<djmix::AuditionController> (audio->cue());
+        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *settings, *library, *audio, *audition);
         importFromCommandLine (commandLine);
     }
 
@@ -54,6 +58,8 @@ public:
     void shutdown() override
     {
         mainWindow = nullptr;
+        audition = nullptr; // before the player it feeds
+        audio = nullptr;
         library = nullptr; // stops any running analysis
         settings = nullptr;
     }
@@ -78,14 +84,18 @@ private:
     class MainWindow final : public juce::DocumentWindow
     {
     public:
-        MainWindow (const juce::String& name, djmix::AppSettings& settings, djmix::LibraryController& library)
+        MainWindow (const juce::String& name,
+                    djmix::AppSettings& settings,
+                    djmix::LibraryController& library,
+                    djmix::AudioOutput& audio,
+                    djmix::AuditionController& audition)
             : DocumentWindow (name,
                               juce::Desktop::getInstance().getDefaultLookAndFeel()
                                   .findColour (juce::ResizableWindow::backgroundColourId),
                               DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            setContentOwned (new djmix::MainComponent (settings, library), true);
+            setContentOwned (new djmix::MainComponent (settings, library, audio, audition), true);
             setResizable (true, true);
             setResizeLimits (900, 560, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
@@ -100,6 +110,8 @@ private:
 
     std::unique_ptr<djmix::AppSettings> settings;
     std::unique_ptr<djmix::LibraryController> library;
+    std::unique_ptr<djmix::AudioOutput> audio;
+    std::unique_ptr<djmix::AuditionController> audition;
     std::unique_ptr<MainWindow> mainWindow;
 };
 

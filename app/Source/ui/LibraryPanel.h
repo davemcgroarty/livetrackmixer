@@ -25,6 +25,8 @@ public:
     // Called with the selected track's id, or 0 when nothing is selected.
     std::function<void (int64_t)> onSelectionChanged;
     std::function<void()> onOpenSettings;
+    // Called with a track's id when its row is double-clicked, to audition it.
+    std::function<void (int64_t)> onAuditionTrack;
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
@@ -36,6 +38,7 @@ public:
     void paintCell (juce::Graphics&, int row, int columnId, int width, int height, bool selected) override;
     void sortOrderChanged (int columnId, bool forwards) override;
     void cellClicked (int row, int columnId, const juce::MouseEvent&) override;
+    void cellDoubleClicked (int row, int columnId, const juce::MouseEvent&) override;
     void selectedRowsChanged (int lastRowSelected) override;
     void deleteKeyPressed (int lastRowSelected) override;
     juce::String getCellTooltip (int row, int columnId) override;

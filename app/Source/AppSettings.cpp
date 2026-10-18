@@ -9,7 +9,13 @@ namespace djmix
 namespace
 {
 constexpr const char* analyzerKey = "analyzerExecutable";
-}
+constexpr const char* audioDeviceKey = "audioDevice";
+constexpr const char* masterPairKey = "masterOutputs";
+constexpr const char* cuePairKey = "cueOutputs";
+constexpr const char* splitCueKey = "splitCue";
+constexpr const char* cueVolumeKey = "cueVolume";
+constexpr float defaultCueVolume = 0.8f;
+} // namespace
 
 std::filesystem::path toPath (const juce::File& file)
 {
@@ -65,6 +71,55 @@ void AppSettings::setAnalyzerExecutable (const std::filesystem::path& executable
 {
     auto* settings = properties.getUserSettings();
     settings->setValue (analyzerKey, executable.empty() ? juce::String() : toFile (executable).getFullPathName());
+    settings->saveIfNeeded();
+}
+
+std::unique_ptr<juce::XmlElement> AppSettings::audioDeviceState() const
+{
+    return properties.getUserSettings()->getXmlValue (audioDeviceKey);
+}
+
+void AppSettings::setAudioDeviceState (const juce::XmlElement* state)
+{
+    auto* settings = properties.getUserSettings();
+    if (state != nullptr)
+        settings->setValue (audioDeviceKey, state);
+    else
+        settings->removeValue (audioDeviceKey);
+    settings->saveIfNeeded();
+}
+
+std::optional<OutputRouting> AppSettings::outputRouting() const
+{
+    auto* settings = properties.getUserSettings();
+    if (! settings->containsKey (masterPairKey))
+        return std::nullopt;
+    OutputRouting r;
+    r.masterFirst = std::max (0, settings->getIntValue (masterPairKey, 0));
+    r.cueFirst = std::max (0, settings->getIntValue (cuePairKey, 2));
+    r.splitCue = settings->getBoolValue (splitCueKey, false);
+    return r;
+}
+
+void AppSettings::setOutputRouting (const OutputRouting& r)
+{
+    auto* settings = properties.getUserSettings();
+    settings->setValue (masterPairKey, r.masterFirst);
+    settings->setValue (cuePairKey, r.cueFirst);
+    settings->setValue (splitCueKey, r.splitCue);
+    settings->saveIfNeeded();
+}
+
+float AppSettings::cueVolume() const
+{
+    return juce::jlimit (0.0f, 1.0f,
+                         static_cast<float> (properties.getUserSettings()->getDoubleValue (cueVolumeKey, defaultCueVolume)));
+}
+
+void AppSettings::setCueVolume (float gain)
+{
+    auto* settings = properties.getUserSettings();
+    settings->setValue (cueVolumeKey, juce::jlimit (0.0f, 1.0f, gain));
     settings->saveIfNeeded();
 }
 

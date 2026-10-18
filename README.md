@@ -22,8 +22,9 @@ validate against it.
 | M1 · Analyzer CLI: schema-valid JSON and `.wfm`, cached by hash | Done (see notes below) |
 | M2a · Library: import, background analysis, track table | Done |
 | M2b · Track view: waveform, beat/bar/phrase grid, sections, content cells | Done |
-| M2c · Audition on Cue | Next |
-| M3–M6 | Not started |
+| M2c · Audition on Cue: sections, phrases and tracks; Master/Cue routing | Done |
+| M3 · Grid and section editing | Next |
+| M4–M6 | Not started |
 
 On the synthetic test clips, BPM is within ±0.02 and downbeats are within 13 ms
 of the reference. The M1 targets are ±0.5 BPM and 30 ms.
@@ -94,9 +95,26 @@ rhythm and melody scores.
 
 Zoom with the mouse wheel or a pinch (around the pointer), from the whole
 track down to two beats; scroll with shift-wheel, a sideways swipe, the scroll
-bar or by dragging. **+** and **-** zoom, **Home** shows the whole track, and
-double-clicking toggles between the whole track and the phrase under the
-pointer.
+bar or by dragging. **+** and **-** zoom and **Home** shows the whole track.
+
+**Auditioning** plays on the Cue output only, never Master:
+
+- Click a section in the strip to hear that section, or click in the waveform
+  to hear the 8-bar phrase under the pointer.
+- Double-click a track in the Library to hear it from the start.
+- Click the same section or phrase again, click **Stop cue**, or press **Esc**
+  to stop.
+
+The selected track is decoded in the background as soon as you pick it, so
+clicks play at once. A playhead shows where you are.
+
+**Audio output** is set in **Settings...**: the device, which outputs carry
+Master and Cue, and the Cue volume. **Test cue** beeps on the Cue outputs.
+- With four or more outputs, Master goes to 1-2 and Cue to 3-4 by default.
+- On a stereo device, or with **Split** chosen, Cue plays in mono on the left
+  and Master in mono on the right, for practising on one pair of headphones.
+
+Master is silent until the Arrangement arrives in M4.
 
 When the app finds a newer (or different) `djanalyze` than the one that
 analysed a track, it analyses the track again in the background; the old
@@ -126,6 +144,11 @@ DJMIX_ANALYZER_OUTPUT=/tmp/analysis ctest --test-dir build
 The Track view tests draw a six-minute track into an image at four zoom levels
 and print the time per frame (a few milliseconds in a Release build). Set
 `DJMIX_SNAPSHOT_DIR` to a folder to also save the images there.
+
+The Cue player is tested by calling its audio callback directly, with no
+device. The tests check routing, fades (no clicks on start, stop, switch or the
+end of a range), resampling, and that decoded audio is only freed off the audio
+thread. They also replace `operator new` to check the callback never allocates.
 
 The analyzer runner is tested against `fake_djanalyze`, a small stand-in built
 with the tests. Set `DJMIX_DJANALYZE` to a real `djanalyze` to also run it

@@ -5,20 +5,41 @@
 namespace djmix
 {
 
-MainComponent::MainComponent (AppSettings& s, LibraryController& c)
-    : settings (s), controller (c), library (c)
+MainComponent::MainComponent (AppSettings& s, LibraryController& c, AudioOutput& a, AuditionController& au)
+    : settings (s), controller (c), audio (a), audition (au), library (c)
 {
     addAndMakeVisible (library);
     addAndMakeVisible (divider);
     addAndMakeVisible (trackView);
     addAndMakeVisible (arrangement);
 
-    library.onOpenSettings = [this] { SettingsComponent::show (settings, controller); };
+    library.onOpenSettings = [this] { SettingsComponent::show (settings, controller, audio); };
     library.onSelectionChanged = [this] (int64_t id)
     {
         selectedTrack = id;
-        trackView.showTrack (controller.findTrack (id));
+        const auto* track = controller.findTrack (id);
+        trackView.showTrack (track);
+        if (track != nullptr)
+            audition.prepare (track->id, track->path); // decode ahead, so a click plays at once
     };
+
+    // Auditions: sections and phrases from the Track view, whole tracks from the Library.
+    trackView.onAudition = [this] (double start, double end)
+    {
+        if (const auto* track = controller.findTrack (selectedTrack))
+            audition.play (track->id, track->path, start, end);
+    };
+    trackView.onStopAudition = [this] { audition.stop(); };
+    library.onAuditionTrack = [this] (int64_t id)
+    {
+        const auto now = audition.status();
+        if (now.trackId == id && (now.playing || now.loading) && juce::exactlyEqual (now.start, 0.0)
+            && juce::exactlyEqual (now.end, 0.0))
+            audition.stop(); // double-clicking it again stops it
+        else if (const auto* track = controller.findTrack (id))
+            audition.play (id, track->path, 0.0, 0.0);
+    };
+    startTimerHz (60);
     controller.addChangeListener (this);
 
     layout.setItemLayout (0, 360, -0.8, -0.42); // library
@@ -30,7 +51,39 @@ MainComponent::MainComponent (AppSettings& s, LibraryController& c)
 
 MainComponent::~MainComponent()
 {
+    stopTimer();
     controller.removeChangeListener (this);
+}
+
+void MainComponent::timerCallback()
+{
+    const auto now = audition.status();
+    const bool showing = now.trackId != 0 && now.trackId == selectedTrack
+                         && (now.playing || now.loading || ! now.error.empty());
+    if (! showing)
+    {
+        trackView.setAudition (std::nullopt);
+        return;
+    }
+    TrackView::Audition a;
+    a.start = now.start;
+    a.end = now.end;
+    a.position = now.position;
+    a.playing = now.playing;
+    a.loading = now.loading;
+    a.error = juce::String::fromUTF8 (now.error.c_str());
+    trackView.setAudition (a);
+}
+
+bool MainComponent::keyPressed (const juce::KeyPress& key)
+{
+    // Esc stops an audition wherever the keyboard focus is.
+    if (key == juce::KeyPress::escapeKey)
+    {
+        audition.stop();
+        return true;
+    }
+    return false;
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
