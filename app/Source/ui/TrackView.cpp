@@ -303,8 +303,22 @@ void TrackView::paintHeader (juce::Graphics& g, juce::Rectangle<int> area)
 
     g.setFont (13.0f);
 
-    // What Cue is doing with this track, rightmost.
+    // The cue mode button, rightmost, then what Cue is doing with this track.
     stopButtonArea = {};
+    modeButtonArea = {};
+    if (loaded)
+    {
+        const juce::String label = "Cue: " + juce::String (std::string (cueModeLabel (cueMode)));
+        const int w = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label) + 30;
+        auto button = area.removeFromRight (w).withSizeKeepingCentre (w, 20);
+        area.removeFromRight (8);
+        modeButtonArea = button;
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRoundedRectangle (button.toFloat(), 4.0f);
+        g.setColour (textColour);
+        paintCueModeIcon (g, button.removeFromLeft (22).toFloat().withSizeKeepingCentre (12.0f, 10.0f));
+        g.drawText (label, button, juce::Justification::centredLeft);
+    }
     if (audition)
     {
         if (audition->error.isNotEmpty())
@@ -655,8 +669,62 @@ void TrackView::mouseUp (const juce::MouseEvent& e)
         handleClick (e.position);
 }
 
+void TrackView::setCueMode (CueMode mode)
+{
+    if (mode == cueMode)
+        return;
+    cueMode = mode;
+    repaint (headerArea);
+}
+
+void TrackView::paintCueModeIcon (juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    // A bar for the cue, then what follows it: a stop, a return arrow, or more track.
+    const float y = r.getCentreY();
+    g.fillRect (juce::Rectangle<float> (r.getX(), y - 1.5f, r.getWidth() * 0.55f, 3.0f));
+    const float x = r.getX() + r.getWidth() * 0.62f;
+    switch (cueMode)
+    {
+        case CueMode::once:
+            g.fillRect (juce::Rectangle<float> (x, r.getY(), 2.0f, r.getHeight()));
+            break;
+        case CueMode::loop:
+        {
+            juce::Path p;
+            p.startNewSubPath (x, y);
+            p.lineTo (r.getRight(), y);
+            p.lineTo (r.getRight(), r.getY());
+            p.lineTo (r.getX() + 1.0f, r.getY());
+            g.strokePath (p, juce::PathStrokeType (1.5f));
+            juce::Path head;
+            head.addTriangle (r.getX(), r.getY(), r.getX() + 4.0f, r.getY() - 3.0f, r.getX() + 4.0f, r.getY() + 3.0f);
+            g.fillPath (head);
+            break;
+        }
+        case CueMode::continueTrack:
+            g.setOpacity (0.45f);
+            g.fillRect (juce::Rectangle<float> (x, y - 1.5f, r.getRight() - x, 3.0f));
+            g.setOpacity (1.0f);
+            break;
+    }
+}
+
+juce::String TrackView::getTooltip()
+{
+    if (modeButtonArea.contains (getMouseXYRelative()))
+        return "What a cue does at the end of its section or phrase: play once and stop, loop, "
+               "or continue through the track. Click to change.";
+    return {};
+}
+
 void TrackView::handleClick (juce::Point<float> position)
 {
+    if (modeButtonArea.toFloat().contains (position))
+    {
+        if (onCycleCueMode)
+            onCycleCueMode();
+        return;
+    }
     if (stopButtonArea.toFloat().contains (position))
     {
         if (onStopAudition)

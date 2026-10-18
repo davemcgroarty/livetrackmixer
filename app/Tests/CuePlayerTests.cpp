@@ -185,6 +185,97 @@ TEST_CASE ("Switching auditions crossfades", "[audio][cue]")
     CHECK (maxStep (joined) < clickFree * 1.0f);
 }
 
+TEST_CASE ("A looping cue repeats its stretch on time, without a seam", "[audio][cue]")
+{
+    // Silence with a click on the stretch's first beat (0.1 s), so each pass
+    // shows up as one peak in the output.
+    auto audio = constant (0.0f, 0.0f, 2.0);
+    const int beat = static_cast<int> (0.1 * rate);
+    const int length = static_cast<int> (0.1 * rate);
+    audio->samples.setSample (0, beat, 1.0f);
+
+    CuePlayer player;
+    player.prepare (rate, 0b1111, block);
+    REQUIRE (player.play (audio, 0.1, 0.2, 1, djmix::CueMode::loop));
+    const auto out = render (player, 4, static_cast<int> (1.0 * rate));
+    CHECK (player.state().playing);
+
+    std::vector<int> peaks;
+    for (int i = 1; i + 1 < static_cast<int> (out[2].size()); ++i)
+        if (out[2][static_cast<size_t> (i)] > 0.5f && out[2][static_cast<size_t> (i)] >= out[2][static_cast<size_t> (i - 1)]
+            && out[2][static_cast<size_t> (i)] >= out[2][static_cast<size_t> (i + 1)])
+            peaks.push_back (i);
+
+    // Ten passes in a second, each a stretch apart, each click at full level
+    // (the fade-in is over before the first beat, the first pass included).
+    REQUIRE (peaks.size() == 10);
+    for (size_t i = 1; i < peaks.size(); ++i)
+        CHECK (peaks[i] - peaks[i - 1] == length);
+    CHECK (peaks.front() <= fadeSamples + 4);
+
+    // A steady sound loops with no dip or step at the seam.
+    auto steady = constant (0.5f, 0.5f, 2.0);
+    REQUIRE (player.play (steady, 0.1, 0.2, 2, djmix::CueMode::loop));
+    render (player, 4, 2048);
+    const auto looped = render (player, 4, static_cast<int> (0.5 * rate));
+    CHECK (*std::min_element (looped[2].begin(), looped[2].end()) == Approx (0.5f).margin (0.01));
+    CHECK (*std::max_element (looped[2].begin(), looped[2].end()) == Approx (0.5f).margin (0.01));
+    const auto position = player.state().position;
+    CHECK (position >= 0.095);
+    CHECK (position < 0.2);
+}
+
+TEST_CASE ("A cue set to continue plays on past its stretch", "[audio][cue]")
+{
+    CuePlayer player;
+    player.prepare (rate, 0b1111, block);
+    REQUIRE (player.play (constant (0.5f, 0.5f, 1.0), 0.1, 0.2, 1, djmix::CueMode::continueTrack));
+    const auto out = render (player, 4, static_cast<int> (0.3 * rate));
+    CHECK (player.state().playing);
+    CHECK (player.state().position == Approx (0.4).margin (0.01));
+    CHECK (out[2].back() == Approx (0.5f).margin (1e-4));
+
+    // To the end of the track, then it stops.
+    render (player, 4, static_cast<int> (0.7 * rate));
+    CHECK_FALSE (player.state().playing);
+}
+
+TEST_CASE ("Changing the cue mode changes the cue playing", "[audio][cue]")
+{
+    CuePlayer player;
+    player.prepare (rate, 0b1111, block);
+    REQUIRE (player.play (constant (0.5f, 0.5f, 2.0), 0.1, 0.2, 1, djmix::CueMode::once));
+    render (player, 4, static_cast<int> (0.05 * rate));
+
+    // Once -> loop before the end: it keeps going round.
+    player.setMode (djmix::CueMode::loop);
+    render (player, 4, static_cast<int> (0.5 * rate));
+    CHECK (player.state().playing);
+    CHECK (player.state().position < 0.2);
+
+    // Loop -> continue: it carries on past the stretch.
+    player.setMode (djmix::CueMode::continueTrack);
+    render (player, 4, static_cast<int> (0.2 * rate));
+    CHECK (player.state().playing);
+    CHECK (player.state().position > 0.2);
+
+    // Continue -> once, already past the stretch: it fades out where it is.
+    player.setMode (djmix::CueMode::once);
+    const auto out = render (player, 4, 4096);
+    CHECK_FALSE (player.state().playing);
+    CHECK (maxStep (out[2]) < clickFree * 0.5f);
+    CHECK (out[2].back() == 0.0f);
+
+    // Continue -> loop past the stretch: back to its start.
+    REQUIRE (player.play (constant (0.5f, 0.5f, 2.0), 0.1, 0.2, 2, djmix::CueMode::continueTrack));
+    render (player, 4, static_cast<int> (0.3 * rate));
+    player.setMode (djmix::CueMode::loop);
+    const auto back = render (player, 4, 2048);
+    CHECK (player.state().playing);
+    CHECK (player.state().position < 0.2);
+    CHECK (maxStep (back[2]) < clickFree * 0.5f);
+}
+
 TEST_CASE ("Split cue sums Cue to mono on the left", "[audio][cue]")
 {
     CuePlayer player;
@@ -236,6 +327,10 @@ TEST_CASE ("The Cue callback never allocates", "[audio][cue][realtime]")
     player.play (a, 0.0, 0.5, 1);
     render (player, 4, 4096);
     player.play (b, 0.2, 0.0, 2); // switch, resampling
+    render (player, 4, 4096);
+    player.play (a, 0.1, 0.15, 3, djmix::CueMode::loop); // several loops
+    render (player, 4, 16384);
+    player.setMode (djmix::CueMode::continueTrack);
     render (player, 4, 4096);
     player.stop();
     render (player, 4, 4096);

@@ -6,6 +6,7 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include "engine/CueMode.h"
 #include "engine/OutputRouting.h"
 
 namespace djmix
@@ -39,6 +40,10 @@ public:
     // Cue volume as a gain, 0 to 1.
     float cueVolume() const;
     void setCueVolume (float gain);
+
+    // What a cue does at the end of its section or phrase.
+    CueMode cueMode() const;
+    void setCueMode (CueMode mode);
 
 private:
     mutable juce::ApplicationProperties properties;

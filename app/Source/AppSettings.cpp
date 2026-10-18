@@ -14,6 +14,7 @@ constexpr const char* masterPairKey = "masterOutputs";
 constexpr const char* cuePairKey = "cueOutputs";
 constexpr const char* splitCueKey = "splitCue";
 constexpr const char* cueVolumeKey = "cueVolume";
+constexpr const char* cueModeSettingKey = "cueMode";
 constexpr float defaultCueVolume = 0.8f;
 } // namespace
 
@@ -120,6 +121,18 @@ void AppSettings::setCueVolume (float gain)
 {
     auto* settings = properties.getUserSettings();
     settings->setValue (cueVolumeKey, juce::jlimit (0.0f, 1.0f, gain));
+    settings->saveIfNeeded();
+}
+
+CueMode AppSettings::cueMode() const
+{
+    return cueModeFromKey (properties.getUserSettings()->getValue (cueModeSettingKey).toStdString());
+}
+
+void AppSettings::setCueMode (CueMode mode)
+{
+    auto* settings = properties.getUserSettings();
+    settings->setValue (cueModeSettingKey, juce::String (std::string (cueModeKey (mode))));
     settings->saveIfNeeded();
 }
 

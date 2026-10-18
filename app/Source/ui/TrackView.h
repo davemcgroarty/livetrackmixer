@@ -7,6 +7,7 @@
 
 #include "analysis/Analysis.h"
 #include "analysis/WaveformFile.h"
+#include "engine/CueMode.h"
 #include "library/LibraryDatabase.h"
 #include "view/TrackStructure.h"
 #include "view/ViewRange.h"
@@ -22,11 +23,13 @@ namespace djmix
 //
 // Clicking a section in the strip, or a phrase in the waveform, asks for it to
 // be auditioned on Cue (onAudition); clicking it again, the Stop button or Esc
-// stops (onStopAudition). setAudition() shows what is playing.
+// stops (onStopAudition). setAudition() shows what is playing. The cue mode
+// button in the header (onCycleCueMode) steps through once, loop and continue.
 //
 // Mouse wheel or pinch zooms around the pointer, shift-wheel or a sideways
 // swipe scrolls, dragging pans; + and - zoom, Home shows the whole track.
 class TrackView final : public juce::Component,
+                        public juce::TooltipClient,
                         private juce::ScrollBar::Listener
 {
 public:
@@ -63,6 +66,10 @@ public:
 
     std::function<void (double start, double end)> onAudition;
     std::function<void()> onStopAudition;
+    std::function<void()> onCycleCueMode;
+
+    // What the cue mode button shows.
+    void setCueMode (CueMode mode);
 
     // What is auditioning now; nothing when this track is not.
     void setAudition (std::optional<Audition> audition);
@@ -82,6 +89,7 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
     bool keyPressed (const juce::KeyPress&) override;
+    juce::String getTooltip() override;
 
 private:
     // What the view last loaded, to tell whether a record has changed.
@@ -107,6 +115,7 @@ private:
     void paintGrid (juce::Graphics&, juce::Rectangle<int> area);
     void paintHover (juce::Graphics&);
     void paintAudition (juce::Graphics&);
+    void paintCueModeIcon (juce::Graphics&, juce::Rectangle<float> area) const;
 
     void handleClick (juce::Point<float> position);
     void requestAudition (double start, double end);
@@ -127,7 +136,8 @@ private:
     juce::ScrollBar scrollBar { false };
 
     std::optional<Audition> audition;
-    juce::Rectangle<int> stopButtonArea;
+    CueMode cueMode = CueMode::once;
+    juce::Rectangle<int> stopButtonArea, modeButtonArea;
 
     std::optional<juce::Point<float>> hover;
     double dragAnchorTime = 0.0;

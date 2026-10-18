@@ -29,7 +29,11 @@ CuePlayer::~CuePlayer() = default;
 //==============================================================================
 // Message thread
 
-bool CuePlayer::play (std::shared_ptr<const DecodedAudio> audio, double startSeconds, double endSeconds, uint64_t tag)
+bool CuePlayer::play (std::shared_ptr<const DecodedAudio> audio,
+                      double startSeconds,
+                      double endSeconds,
+                      uint64_t tag,
+                      CueMode mode)
 {
     if (audio == nullptr || ! deviceRunning.load())
         return false;
@@ -40,6 +44,7 @@ bool CuePlayer::play (std::shared_ptr<const DecodedAudio> audio, double startSec
     c.startSeconds = startSeconds;
     c.endSeconds = endSeconds;
     c.tag = tag;
+    c.mode = mode;
     c.serial = nextSerial++;
 
     // Keep the audio alive until the audio thread is done with it; one entry
@@ -58,6 +63,15 @@ void CuePlayer::stop()
 {
     Command c;
     c.type = Command::Type::stop;
+    c.serial = nextSerial++;
+    push (c);
+}
+
+void CuePlayer::setMode (CueMode mode)
+{
+    Command c;
+    c.type = Command::Type::setMode;
+    c.mode = mode;
     c.serial = nextSerial++;
     push (c);
 }
@@ -168,10 +182,28 @@ void CuePlayer::handleCommands()
         for (int i = 0; i < size; ++i)
         {
             const auto& c = commands[static_cast<size_t> (start + i)];
-            if (c.type == Command::Type::play)
-                startVoice (c);
-            else
-                voices[static_cast<size_t> (current)].fadeTarget = 0.0f;
+            auto& v = voices[static_cast<size_t> (current)];
+            switch (c.type)
+            {
+                case Command::Type::play:
+                {
+                    const auto& audio = *c.audio;
+                    const auto length = static_cast<int64_t> (audio.samples.getNumSamples());
+                    const auto toFrame = [&] (double seconds)
+                    { return std::clamp (static_cast<int64_t> (seconds * audio.sampleRate), int64_t { 0 }, length); };
+                    const auto from = toFrame (c.startSeconds);
+                    const auto to = c.endSeconds > c.startSeconds ? toFrame (c.endSeconds) : length;
+                    startVoice (c.audio, from, to, c.mode, c.tag);
+                    break;
+                }
+                case Command::Type::stop:
+                    v.fadeTarget = 0.0f;
+                    break;
+                case Command::Type::setMode:
+                    if (v.active() && v.fadeTarget > 0.0f)
+                        applyMode (v, c.mode);
+                    break;
+            }
             lastConsumed.store (c.serial);
         }
     };
@@ -179,25 +211,66 @@ void CuePlayer::handleCommands()
     run (scope.startIndex2, scope.blockSize2);
 }
 
-void CuePlayer::startVoice (const Command& c)
+void CuePlayer::startVoice (const DecodedAudio* audio, int64_t start, int64_t end, CueMode mode, uint64_t tag)
 {
     // What was playing fades out in its slot; the new audition takes the other.
     voices[static_cast<size_t> (current)].fadeTarget = 0.0f;
     current = 1 - current;
 
+    // Start one fade early, so the fade-in is over by the first beat: a cue's
+    // opening hit plays at full level, and each pass of a loop lands on time.
     auto& v = voices[static_cast<size_t> (current)];
-    const auto& audio = *c.audio;
-    const auto length = static_cast<int64_t> (audio.samples.getNumSamples());
-    const auto toFrame = [&] (double seconds) { return std::clamp (static_cast<int64_t> (seconds * audio.sampleRate), int64_t { 0 }, length); };
-
-    v.audio = c.audio;
-    v.readIndex = toFrame (c.startSeconds);
-    v.endIndex = c.endSeconds > c.startSeconds ? toFrame (c.endSeconds) : length;
+    v.audio = audio;
+    v.readIndex = std::max (int64_t { 0 }, start - fadeFrames (*audio));
+    v.rangeStart = start;
+    v.rangeEnd = end;
     v.fade = 0.0f;
     v.fadeTarget = 1.0f;
-    v.tag = c.tag;
+    v.tag = tag;
     for (auto& i : v.interpolators)
         i.reset();
+    applyMode (v, mode);
+}
+
+void CuePlayer::applyMode (Voice& v, CueMode mode)
+{
+    v.mode = mode;
+    const auto length = static_cast<int64_t> (v.audio->samples.getNumSamples());
+    if (mode == CueMode::continueTrack)
+    {
+        v.endIndex = length;
+    }
+    else if (v.readIndex < v.rangeEnd)
+    {
+        v.endIndex = v.rangeEnd;
+    }
+    else
+    {
+        // Already past the end of its stretch (it was continuing): once fades
+        // out where it is, loop goes back to the start on the next block.
+        v.endIndex = length;
+        if (mode == CueMode::once)
+            v.fadeTarget = 0.0f;
+    }
+}
+
+int64_t CuePlayer::fadeFrames (const DecodedAudio& audio) const
+{
+    return static_cast<int64_t> (std::ceil (fadeSeconds * audio.sampleRate));
+}
+
+int CuePlayer::samplesUntilLoop (const Voice& v) const
+{
+    // Output samples until the voice is one fade from the end of its stretch.
+    // The next pass starts there, one fade before the stretch's start, so the
+    // two cross over the last and first few milliseconds and the loop is as
+    // long as the stretch.
+    const double ratio = v.audio->sampleRate / rate;
+    const auto loopAt = std::max (v.rangeEnd - fadeFrames (*v.audio), v.rangeStart + 1);
+    const auto frames = loopAt - v.readIndex;
+    if (frames <= 0)
+        return 0;
+    return static_cast<int> (std::min<double> (std::ceil (static_cast<double> (frames) / ratio), INT_MAX));
 }
 
 void CuePlayer::renderVoice (Voice& v, float* left, float* right, int numSamples)
@@ -280,10 +353,23 @@ void CuePlayer::audioDeviceIOCallbackWithContext (const float* const*,
     const float cueGain = gain.load();
     auto output = [&] (int index) -> float* { return index >= 0 && index < numOutputs ? outputs[index] : nullptr; };
 
-    // In chunks no longer than the scratch buffer.
+    // In chunks no longer than the scratch buffer, and split where a looping
+    // audition goes back to its start, so the loop is sample-accurate.
     for (int done = 0; done < numSamples;)
     {
-        const int n = std::min (numSamples - done, scratch.getNumSamples());
+        int n = std::min (numSamples - done, scratch.getNumSamples());
+        auto& now = voices[static_cast<size_t> (current)];
+        if (now.active() && now.mode == CueMode::loop && now.fadeTarget > 0.0f)
+        {
+            const int untilLoop = samplesUntilLoop (now);
+            if (untilLoop == 0)
+            {
+                startVoice (now.audio, now.rangeStart, now.rangeEnd, CueMode::loop, now.tag);
+                continue;
+            }
+            n = std::min (n, untilLoop);
+        }
+
         float* mixL = scratch.getWritePointer (0);
         float* mixR = scratch.getWritePointer (1);
         float* voiceL = scratch.getWritePointer (2);

@@ -54,6 +54,11 @@ public:
     void play (int64_t trackId, const std::filesystem::path& file, double start, double end);
     void stop();
 
+    // What auditions do at the end of their section or phrase; a change also
+    // applies to the one playing.
+    void setMode (CueMode mode);
+    CueMode mode() const { return cueMode; }
+
     // The current audition, for drawing. Also frees audio the player is done with.
     Status status();
 
@@ -90,6 +95,7 @@ private:
     std::optional<Request> waiting; // a play request waiting for its decode
     Request current;                // the audition last handed to the player
     uint64_t nextTag = 1;
+    CueMode cueMode = CueMode::once;
     std::string lastError;
     std::filesystem::path decoding; // the file being decoded or queued, if any
 

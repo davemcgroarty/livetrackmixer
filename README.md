@@ -104,6 +104,18 @@ bar or by dragging. **+** and **-** zoom and **Home** shows the whole track.
 - Double-click a track in the Library to hear it from the start.
 - Click the same section or phrase again, click **Stop cue**, or press **Esc**
   to stop.
+- The **Cue** button in the Track view header sets what a cue does when it
+  reaches the end of its section or phrase. Click it to step through:
+  - **Once**: stop.
+  - **Loop**: go round again.
+  - **Continue**: play on through the rest of the track.
+
+  Changing it while a cue plays changes that cue, and the choice is
+  remembered.
+
+A cue starts 5 ms early, so its fade-in is over by the first beat and the
+opening hit plays at full level. Each loop pass crossfades over the last and
+first 5 ms, so the loop is exactly as long as the section and keeps time.
 
 The selected track is decoded in the background as soon as you pick it, so
 clicks play at once. A playhead shows where you are.

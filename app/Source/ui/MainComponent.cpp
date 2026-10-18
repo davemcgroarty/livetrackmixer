@@ -30,6 +30,15 @@ MainComponent::MainComponent (AppSettings& s, LibraryController& c, AudioOutput&
             audition.play (track->id, track->path, start, end);
     };
     trackView.onStopAudition = [this] { audition.stop(); };
+    audition.setMode (settings.cueMode());
+    trackView.setCueMode (settings.cueMode());
+    trackView.onCycleCueMode = [this]
+    {
+        const auto mode = nextCueMode (audition.mode());
+        audition.setMode (mode);
+        settings.setCueMode (mode);
+        trackView.setCueMode (mode);
+    };
     library.onAuditionTrack = [this] (int64_t id)
     {
         const auto now = audition.status();

@@ -9,6 +9,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include "CueMode.h"
 #include "OutputRouting.h"
 
 namespace djmix
@@ -26,6 +27,10 @@ struct DecodedAudio
 // Plays auditions on the Cue bus: a stretch of a decoded track, resampled to
 // the device rate, faded in and out over a few milliseconds so starts, stops
 // and switches never click. Nothing it plays reaches Master.
+//
+// At the end of its stretch an audition stops, loops (crossfading back to its
+// start over the same few milliseconds) or plays on to the end of the track,
+// as its CueMode says.
 //
 // Threads: play, stop and the setters are for the message thread; commands
 // reach the audio thread through a lock-free FIFO. The audio thread never
@@ -49,8 +54,15 @@ public:
     // Plays [startSeconds, endSeconds) of `audio` (to the end if endSeconds
     // is not after startSeconds), replacing whatever is playing. `tag` comes
     // back in state(). Returns false if no device is running.
-    bool play (std::shared_ptr<const DecodedAudio> audio, double startSeconds, double endSeconds, uint64_t tag);
+    bool play (std::shared_ptr<const DecodedAudio> audio,
+               double startSeconds,
+               double endSeconds,
+               uint64_t tag,
+               CueMode mode = CueMode::once);
     void stop();
+
+    // Changes what the audition playing now does at the end of its stretch.
+    void setMode (CueMode mode);
 
     void setGain (float linearGain) { gain.store (linearGain); }
     float getGain() const { return gain.load(); }
@@ -85,9 +97,11 @@ private:
         enum class Type
         {
             play,
-            stop
+            stop,
+            setMode
         };
         Type type = Type::stop;
+        CueMode mode = CueMode::once;
         const DecodedAudio* audio = nullptr;
         double startSeconds = 0.0;
         double endSeconds = 0.0;
@@ -98,8 +112,11 @@ private:
     struct Voice
     {
         const DecodedAudio* audio = nullptr;
-        int64_t readIndex = 0; // next source frame the interpolators read
-        int64_t endIndex = 0;
+        int64_t readIndex = 0;  // next source frame the interpolators read
+        int64_t endIndex = 0;   // where it fades out and stops
+        int64_t rangeStart = 0; // the stretch it auditions
+        int64_t rangeEnd = 0;
+        CueMode mode = CueMode::once;
         float fade = 0.0f;     // current fade gain
         float fadeTarget = 0.0f;
         uint64_t tag = 0;
@@ -110,7 +127,10 @@ private:
 
     void push (const Command& command);
     void handleCommands();
-    void startVoice (const Command& command);
+    void startVoice (const DecodedAudio* audio, int64_t start, int64_t end, CueMode mode, uint64_t tag);
+    void applyMode (Voice& voice, CueMode mode);
+    int samplesUntilLoop (const Voice& voice) const;
+    int64_t fadeFrames (const DecodedAudio& audio) const; // source frames in one fade
     void renderVoice (Voice& voice, float* left, float* right, int numSamples);
     void publishState();
 

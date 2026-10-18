@@ -55,6 +55,12 @@ void AuditionController::play (int64_t trackId, const std::filesystem::path& fil
         decodeInBackground (file);
 }
 
+void AuditionController::setMode (CueMode mode)
+{
+    cueMode = mode;
+    player.setMode (mode);
+}
+
 void AuditionController::stop()
 {
     waiting.reset();
@@ -104,7 +110,7 @@ void AuditionController::startPlaying (Request request, std::shared_ptr<const De
 {
     waiting.reset();
     current = request;
-    if (! player.play (std::move (audio), request.start, request.end, request.tag))
+    if (! player.play (std::move (audio), request.start, request.end, request.tag, cueMode))
         lastError = "No audio output is open. Choose one in Settings.";
 }
 

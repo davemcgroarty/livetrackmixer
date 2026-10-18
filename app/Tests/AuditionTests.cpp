@@ -178,7 +178,8 @@ TEST_CASE ("Auditions decode in the background and then play", "[audio][audition
     CHECK (status.playing);
     CHECK (status.start == 0.5);
     CHECK (status.end == 1.0);
-    CHECK (status.position == Approx (0.5 + 512 / 44100.0).margin (0.002));
+    // Playback starts one fade early, so the cue's first beat is at full level.
+    CHECK (status.position == Approx (0.5 - CuePlayer::fadeSeconds + 512 / 44100.0).margin (0.001));
 
     // A decoded track plays at once, without a background trip.
     audition.play (1, a, 1.0, 1.5);
@@ -196,6 +197,21 @@ TEST_CASE ("Auditions decode in the background and then play", "[audio][audition
     CHECK (status.trackId == 2);
     CHECK (status.playing);
     CHECK (audition.cachedFiles() == std::vector<fs::path> { b, a });
+
+    // The cue mode applies to new auditions and to the one playing.
+    audition.setMode (djmix::CueMode::loop);
+    CHECK (audition.mode() == djmix::CueMode::loop);
+    audition.play (1, a, 0.5, 0.6);
+    for (int i = 0; i < 40; ++i) // 0.46 s: several times round 0.1 s
+        renderBlock (player);
+    status = audition.status();
+    CHECK (status.playing);
+    CHECK (status.position < 0.6);
+
+    audition.setMode (djmix::CueMode::continueTrack);
+    for (int i = 0; i < 20; ++i)
+        renderBlock (player);
+    CHECK (audition.status().position > 0.6);
 
     audition.stop();
     renderBlock (player, 4096);
