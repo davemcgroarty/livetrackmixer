@@ -1,6 +1,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <optional>
+#include <vector>
+
 #include "view/EffectiveAnalysis.h"
 #include "view/TapTempo.h"
 
