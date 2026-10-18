@@ -80,18 +80,21 @@ def analyze(audio_path: Path, cache_dir: Path, options: Options = Options(), pro
     sr = decoded.sample_rate
     duration = decoded.duration
 
+    progress.stage("spectrum")
+    spectral = features.compute(mono, sr, on_progress=lambda f: progress.stage("spectrum", f))
+
     progress.stage("beats")
+    envelope = beats.onset_envelope(mono, sr)
     use_models = options.engine == "auto"
     if use_models and beats.allin1_available():
         primary = beats.estimate_allin1(audio_path)
     else:
-        primary = beats.estimate_builtin(mono, sr)
+        primary = beats.estimate_builtin(mono, sr, envelope, spectral.harmonic_chroma, features.HOP)
     progress.stage("beats", 0.6)
     secondary = beats.estimate_beat_this(audio_path) if use_models and beats.beat_this_available() else None
-    grid = beats.build_grid(mono, sr, duration, primary, secondary)
+    grid = beats.build_grid(envelope, sr, duration, primary, secondary)
 
     progress.stage("structure")
-    spectral = features.compute(mono, sr)
     bars = structure.bars_from_grid(grid)
     bar_spans = [(b.start, structure.bar_end(bars, i, grid.beats, duration)) for i, b in enumerate(bars)]
     if grid.segments:
@@ -113,7 +116,7 @@ def analyze(audio_path: Path, cache_dir: Path, options: Options = Options(), pro
     }
 
     progress.stage("key")
-    estimator = key.KeyEstimator(mono, sr, spectral.harmonic, features.HOP, use_models and key.essentia_available())
+    estimator = key.KeyEstimator(mono, sr, spectral.harmonic_chroma, features.HOP, use_models and key.essentia_available())
     overall_key = estimator.estimate()
     section_keys = [
         key.section_key(estimator.estimate(s.start, s.end), section_scores["melody"][i]) for i, s in enumerate(sections)

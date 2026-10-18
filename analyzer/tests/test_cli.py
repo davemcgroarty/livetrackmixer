@@ -17,7 +17,7 @@ import soundfile
 import djanalyze
 from djanalyze import audio, cli, pipeline, schema, waveform
 from djanalyze.progress import Progress
-from conftest import REPO
+from conftest import REPO, generate
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess:
@@ -54,7 +54,7 @@ def test_progress_lines(analysed):
         stages = [line["stage"] for line in lines]
         assert stages[0] == "hash"
         assert stages[-1] == "done"
-        for expected in ("decode", "beats", "structure", "key", "descriptors", "waveform", "write"):
+        for expected in ("decode", "spectrum", "beats", "structure", "key", "descriptors", "waveform", "write"):
             assert expected in stages
         progress = [line["progress"] for line in lines]
         assert progress == sorted(progress), "progress never goes backwards"
@@ -159,3 +159,57 @@ def test_unreadable_format_without_ffmpeg_names_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(audio.shutil, "which", lambda _: None)
     with pytest.raises(ValueError, match="ffmpeg"):
         audio.decode(fake)
+
+
+def _analyse_and_measure(track, cache_dir):
+    """Analyse `track` in a fresh process; return (peak memory in MB, analysis document)."""
+    script = (
+        "import resource, sys\n"
+        "from djanalyze import cli\n"
+        "code = cli.main(sys.argv[1:])\n"
+        "print('peak_mb', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1 << 20 if sys.platform == 'darwin' else 1 << 10))\n"
+        "sys.exit(code)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, "analyze", str(track), "--out", str(cache_dir), "--engine", "builtin"],
+        capture_output=True, text=True, check=False, cwd=REPO,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    peak = float(result.stdout.splitlines()[-1].split()[1])
+    done = json.loads(result.stdout.splitlines()[-2])
+    return peak, json.loads(open(done["json"]).read())
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="peak memory is read with the resource module")
+def test_long_tracks_analyse_in_bounded_memory(tmp_path):
+    """Memory must not grow with track length beyond the decoded audio itself.
+
+    Compares a 2-minute and a 6-minute version of one track, so the result does
+    not depend on how much each platform's libraries take at start-up (macOS
+    reports several hundred MB more than Linux for the same run).
+    """
+    import copy
+
+    import soundfile as sf
+
+    base = next(c for c in generate.load_manifest() if c["name"] == "house_124_a_minor")
+    peaks = {}
+    for repeats in (2, 6):  # 64 and 192 bars at 124 BPM
+        clip = copy.deepcopy(base)
+        clip["sections"] = base["sections"] * repeats
+        audio_data, reference = generate.render(clip)
+        track = tmp_path / f"track{repeats}.wav"
+        sf.write(track, audio_data, generate.SAMPLE_RATE)
+        peaks[repeats], document = _analyse_and_measure(track, tmp_path / "cache")
+
+    # The 4 extra minutes hold about 130 MB of decoded audio and per-frame
+    # features. Linux reports growth of about 140 MB, macOS about 430 MB (its
+    # allocator keeps freed memory); whole-track spectrograms cost over 10 GB.
+    growth = peaks[6] - peaks[2]
+    assert growth < 800, f"peak memory grew by {growth:.0f} MB ({peaks[2]:.0f} -> {peaks[6]:.0f} MB)"
+    assert peaks[6] < 2500, f"peak memory {peaks[6]:.0f} MB"
+
+    # And the long track's analysis is right: constant tempo, sections on time.
+    assert document["tempo"]["bpm"] == pytest.approx(reference.bpm, abs=0.5)
+    assert document["tempo"]["variable"] is False
+    assert [s["startBar"] for s in document["sections"]][:4] == reference.section_start_bars[:4]

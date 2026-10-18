@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/davemcgroarty/livetrackmixer/schemas/project.v1.schema.json",
+  "title": "DJ Mixer project (.djmix, version 1)",
+  "description": "An arrangement: layers, and clips of library tracks placed on them. Every position and length is in beats, not seconds. A clip's source beats count beats of its track's effective grid (analysis plus the library's grid override) from the track's first beat, beat 0; its timeline beats count beats at project tempo from the start of the arrangement. Layers are listed in the order they are drawn, top first. Ids are unique across layers and clips.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "name", "tempo", "key", "layers", "clips", "transitions"],
+  "properties": {
+    "format": { "const": "djmix.project" },
+    "version": { "const": 1 },
+    "name": { "type": "string" },
+    "tempo": { "description": "Project tempo, BPM.", "type": "number", "minimum": 40, "maximum": 250 },
+    "key": {
+      "description": "The project's key on the Camelot wheel, or null.",
+      "oneOf": [{ "type": "string", "pattern": "^(1[0-2]|[1-9])[AB]$" }, { "type": "null" }]
+    },
+    "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
+    "clips": { "type": "array", "items": { "$ref": "#/$defs/clip" } },
+    "transitions": {
+      "description": "Reserved for transitions (M5); empty in version 1.",
+      "type": "array",
+      "maxItems": 0
+    }
+  },
+  "$defs": {
+    "id": { "type": "integer", "minimum": 1 },
+    "gain": { "description": "Linear gain.", "type": "number", "minimum": 0, "maximum": 16 },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "gain", "mute", "solo", "cue"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "gain": { "$ref": "#/$defs/gain" },
+        "mute": { "type": "boolean" },
+        "solo": { "type": "boolean" },
+        "cue": { "description": "Also sent to the Cue bus.", "type": "boolean" }
+      }
+    },
+    "clip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "trackId",
+        "fileHash",
+        "layerId",
+        "sourceStartBeat",
+        "timelineStartBeat",
+        "lengthBeats",
+        "gain",
+        "transposeSemitones",
+        "label"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "trackId": { "description": "The track's id in the library.", "type": "integer" },
+        "fileHash": {
+          "description": "The track file's hash, to relink a moved file.",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "layerId": { "$ref": "#/$defs/id" },
+        "sourceStartBeat": { "type": "number" },
+        "timelineStartBeat": { "type": "number", "minimum": 0 },
+        "lengthBeats": { "type": "number", "exclusiveMinimum": 0 },
+        "gain": { "$ref": "#/$defs/gain" },
+        "transposeSemitones": { "type": "integer", "minimum": -12, "maximum": 12 },
+        "label": { "type": "string" }
+      }
+    }
+  }
+}

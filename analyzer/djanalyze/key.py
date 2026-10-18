@@ -106,15 +106,14 @@ def estimate_essentia(mono: np.ndarray) -> Key:
 class KeyEstimator:
     """Overall and per-section keys from one chroma computation."""
 
-    def __init__(self, mono: np.ndarray, sr: int, harmonic_power: np.ndarray, hop: int, use_essentia: bool) -> None:
+    def __init__(self, mono: np.ndarray, sr: int, harmonic_chroma: np.ndarray, hop: int, use_essentia: bool) -> None:
+        """harmonic_chroma: 12 × frames chroma of the harmonic part, `hop` samples per frame."""
         self.mono = mono
         self.sr = sr
         self.hop = hop
         self.use_essentia = use_essentia
         if not use_essentia:
-            import librosa
-
-            self.chroma = np.log1p(CHROMA_COMPRESSION * librosa.feature.chroma_stft(S=harmonic_power, sr=sr))
+            self.chroma = np.log1p(CHROMA_COMPRESSION * harmonic_chroma)
 
     def estimate(self, start: float = 0.0, end: float | None = None) -> Key:
         if self.use_essentia:

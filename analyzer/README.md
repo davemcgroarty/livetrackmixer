@@ -18,7 +18,7 @@ Exit codes: 0 success or cached, 1 analysis failed, 2 no such input file.
 
 | Stage | With the models installed | Built-in fallback |
 | --- | --- | --- |
-| Beats and downbeats | allin1 | librosa beat tracker; downbeat phase from chord changes and low-frequency onsets |
+| Beats and downbeats | allin1 | constant grid fitted to the onset envelope (librosa's tracker for variable tempo); downbeat phase from chord changes and low-frequency onsets |
 | Downbeat cross-check | Beat This!: over 10% of bars disagreeing sets `confidence.beats` to 0.3 | none; `confidence.beats` is capped at 0.7 |
 | Sections | allin1 segments snapped to bars, labels discarded | Foote novelty on a bar-by-bar self-similarity matrix (MFCC, chroma, band levels) |
 | Key, overall and per section | Essentia `KeyExtractor` (EDMA profile) | Log-compressed harmonic chroma against Albrecht–Shanahan key profiles |
@@ -27,15 +27,25 @@ Exit codes: 0 success or cached, 1 analysis failed, 2 no such input file.
 
 Common to both engines:
 
-- **Constant-tempo grid.** Detected beats are fitted with a straight line, and
-  the grid's phase is refined against the onset envelope. When the beats sit
-  within 8% of a beat of the line (median), the grid becomes the beat list,
-  from the first beat after 0 s to the end of the file. Otherwise
-  `tempo.variable` is true and the detected beats are kept.
+- **Constant-tempo grid.** With the built-in engine, the tempo is searched
+  near the onset envelope's main periodicity for the beat period at which the
+  whole track's onsets line up most sharply, and the grid's phase is then
+  refined to 1 ms. The grid is checked against the music in 16-beat windows:
+  the share of rhythmic windows whose own beat phase is within 25 ms of the
+  grid is the beat confidence (capped at 0.7 without a second model). Below
+  0.5 the track counts as variable tempo (`tempo.variable`) and keeps the beats
+  librosa's tracker found. This holds up where a beat tracker briefly follows
+  syncopation. With allin1, its beats are fitted with a straight line instead,
+  and a median deviation over 8% of a beat makes the track variable.
 - **Bars** start at each downbeat, numbered from 1. 4/4 is assumed.
 - **Phrases** are 8 bars, or 16 in sections of 32 bars or more that divide
   evenly. Every section boundary starts a phrase. The final phrase of a section
   can be shorter.
+- **Memory and speed.** Spectrograms are computed 20 seconds at a time and
+  reduced at once to the per-frame values later stages use, so memory does not
+  grow with track length: a 6-minute track peaks under 1 GB (much of it the
+  Python libraries themselves) and takes about a minute with the built-in
+  engine. Progress lines arrive throughout the long spectrum stage.
 - **Sections without a reliable key** (key confidence under 0.5 or melody
   score under 0.15) get `"key": null`.
 
@@ -46,16 +56,36 @@ section, and `perBar.raw` holds the measurements behind them.
 
 | Score | Measurement | 0 at | 1 at |
 | --- | --- | --- | --- |
-| rhythm | percussive (HPSS) onset strength × how much of it lands within 30 ms of the 8th-note grid | 0 | 1.5 |
+| rhythm | percussive (HPSS) onset strength (0 at 0.2, 1 at 0.9) × periodicity (0 at 0.1, 1 at 0.8) | see ranges | see ranges |
 | bass | energy below 150 Hz | −45 dBFS | −5 dBFS |
 | high | energy above 5 kHz | −60 dBFS | −20 dBFS |
 | melody | harmonic (HPSS) energy from 200 Hz to 4 kHz × (chroma clarity + harmonic share) / 2 | −50 dBFS | −12 dBFS |
 | energyPerBar | full-band energy | −45 dBFS | −3 dBFS |
 
+Periodicity is how strongly the onsets around a bar repeat every beat, half bar
+or bar. It is the autocorrelation of the onset envelope over the bar and one bar
+either side, lightly smoothed so that human timing doesn't count against it. It
+needs the beat period but not the exact grid, so syncopation, 16th-note hats
+and swing still read as steady. `raw.rhythmRegularity` stores it.
+
 These reference ranges are fixed (`REFERENCE` in `descriptors.py`), so scores
-compare across tracks. They were set on the synthetic test clips, which master
-to about −15 LUFS, with headroom for louder masters. They still need checking
-against a sample of real tracks.
+compare across tracks. The dB ranges were set on the synthetic test clips,
+which master to about −15 LUFS, with headroom for louder masters; they still
+need checking against a sample of real tracks.
+
+The rhythm ranges were set against real recordings. Median bar scores in
+0.1.3:
+
+| Material | Rhythm |
+| --- | --- |
+| synthetic house and techno, kick sections | 1.0 |
+| electronic and drum & bass tracks | 0.8–0.9 |
+| ragtime piano, pizzicato orchestra | about 0.8 |
+| string orchestra with rubato | 0.36 |
+| solo trumpet | 0.09 |
+
+A steady pulse from any instrument counts, not only drums. Rhythm from the
+drums stem (planned with stems) will tell them apart.
 
 ## Tests
 

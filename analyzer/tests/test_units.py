@@ -5,8 +5,47 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from djanalyze import beats, key, loudness, structure, waveform
+from djanalyze import beats, descriptors, features, key, loudness, structure, waveform
 from djanalyze.beats import BeatEstimate
+
+
+# --------------------------------------------------------------- descriptors
+
+FRAME = 512 / 44100
+
+
+def _onset_train(times: np.ndarray, length_frames: int) -> np.ndarray:
+    envelope = np.zeros(length_frames)
+    np.add.at(envelope, np.clip(np.round(times / FRAME).astype(int), 0, length_frames - 1), 1.0)
+    return descriptors._smoothed(envelope)
+
+
+def test_a_steady_beat_is_periodic_despite_human_timing():
+    rng = np.random.default_rng(1)
+    period = 60 / 126
+    # Kicks on the beat and hats on the 16ths around them, played by hand.
+    grid = np.arange(0, 40, period / 4)
+    hits = grid + rng.normal(0, 0.008, len(grid))
+    envelope = _onset_train(hits, int(42 / FRAME))
+    bar = 4 * period
+    assert descriptors._periodicity(envelope, FRAME, 10 * bar, 11 * bar, period) > 0.8
+
+
+def test_onsets_without_a_pulse_are_not_periodic():
+    rng = np.random.default_rng(2)
+    period = 60 / 126
+    envelope = _onset_train(np.sort(rng.uniform(0, 40, 300)), int(42 / FRAME))
+    bar = 4 * period
+    # Any one bar can line up by chance; on average random onsets stay low.
+    values = [descriptors._periodicity(envelope, FRAME, k * bar, (k + 1) * bar, period) for k in range(1, 19)]
+    assert np.mean(values) < 0.2
+    assert descriptors._periodicity(np.zeros(1000), FRAME, 1.0, 3.0, period) == 0.0
+
+
+def test_local_period_follows_a_tempo_change():
+    beats_ = np.concatenate([np.arange(0, 30, 0.5), 30 + np.arange(0, 30, 0.4)])
+    assert descriptors._local_period(beats_, 10, 12) == pytest.approx(0.5)
+    assert descriptors._local_period(beats_, 45, 46.6) == pytest.approx(0.4)
 
 
 # --------------------------------------------------------------------- beats
@@ -21,6 +60,55 @@ def test_fit_grid_recovers_tempo_through_jitter_and_a_missed_beat():
     assert 60 / fitted_period == pytest.approx(126, abs=0.05)
     assert offset == pytest.approx(0.3, abs=0.005)
     assert deviation < 0.02
+
+
+def test_fit_grid_does_not_drift_over_a_long_track():
+    """Beats quantised to 128-sample frames, over 6 minutes: the median gap is
+    slightly off, which must not misnumber beats late in the track."""
+    sr, hop, period = 44100, 128, 60 / 124
+    exact = 0.2 + period * np.arange(760)
+    quantised = np.round(exact * sr / hop) * hop / sr
+    fitted_period, offset, deviation = beats.fit_grid(quantised)
+    assert 60 / fitted_period == pytest.approx(124, abs=0.01)
+    assert deviation < 0.01
+
+
+def _impulse_envelope(beat_times, sr=44100, duration=None, strengths=None):
+    frame = beats.ONSET_HOP / sr
+    duration = duration if duration is not None else float(np.max(beat_times)) + 1.0
+    envelope = np.zeros(int(duration / frame) + 1)
+    for i, t in enumerate(beat_times):
+        envelope[int(round(t / frame))] += 1.0 if strengths is None else strengths[i]
+    return envelope
+
+
+def test_constant_grid_survives_syncopation():
+    """Loud off-beat hits for a stretch (which throw a beat tracker) must not
+    move the grid or make the track look variable."""
+    sr, period = 44100, 60 / 126
+    on_beat = 0.31 + period * np.arange(600)
+    off_beat = on_beat[200:232] + period / 2  # 8 bars of strong syncopation
+    times = np.concatenate([on_beat, off_beat])
+    strengths = np.concatenate([np.ones(len(on_beat)), np.full(len(off_beat), 1.5)])
+    grid = beats.fit_constant_grid(_impulse_envelope(times, sr, strengths=strengths), sr, 125.0)
+    assert 60 / grid.period == pytest.approx(126, abs=0.01)
+    assert (grid.offset - 0.31 + grid.period / 2) % grid.period - grid.period / 2 == pytest.approx(0, abs=0.006)
+    assert grid.consistency > 0.8
+
+
+def test_drifting_tempo_is_not_a_constant_grid():
+    sr = 44100
+    # A live-played feel: tempo wanders from 120 to 128 BPM and back.
+    bpm = 124 + 4 * np.sin(np.linspace(0, 2 * np.pi, 500))
+    times = np.cumsum(60 / bpm)
+    grid = beats.fit_constant_grid(_impulse_envelope(times, sr), sr, 124.0)
+    assert grid.consistency < beats.MIN_GRID_CONSISTENCY
+
+
+def test_fold_bpm():
+    assert beats.fold_bpm(62) == 124
+    assert beats.fold_bpm(260) == 130
+    assert beats.fold_bpm(128) == 128
 
 
 def test_constant_grid_starts_at_the_first_beat_after_zero():
@@ -49,10 +137,10 @@ def _estimate(downbeat_phase: int, source: str) -> BeatEstimate:
 
 def test_cross_check_lowers_confidence_when_downbeats_disagree():
     sr = 8000
-    mono = np.zeros(sr * 33)
-    duration = len(mono) / sr
-    agree = beats.build_grid(mono, sr, duration, _estimate(0, "a"), _estimate(0, "b"))
-    disagree = beats.build_grid(mono, sr, duration, _estimate(0, "a"), _estimate(1, "b"))
+    duration = 33.0
+    envelope = np.zeros(int(duration * sr / beats.ONSET_HOP))
+    agree = beats.build_grid(envelope, sr, duration, _estimate(0, "a"), _estimate(0, "b"))
+    disagree = beats.build_grid(envelope, sr, duration, _estimate(0, "a"), _estimate(1, "b"))
     assert agree.confidence > 0.8
     assert disagree.confidence <= beats.LOW_BEAT_CONFIDENCE
     assert disagree.sources == ["a", "b"]
@@ -198,3 +286,50 @@ def test_waveform_rejects_other_files(tmp_path):
     path.write_bytes(b"RIFF" + bytes(40))
     with pytest.raises(ValueError):
         waveform.read(path)
+
+
+# ------------------------------------------------------------------ chunking
+
+
+def _test_signal(seconds: float, sr: int = 44100) -> np.ndarray:
+    rng = np.random.default_rng(3)
+    t = np.arange(int(seconds * sr)) / sr
+    clicks = (np.sin(2 * np.pi * 60 * t) * (np.mod(t, 0.5) < 0.05)).astype(np.float32)
+    return clicks + 0.05 * rng.standard_normal(len(t)).astype(np.float32) + 0.2 * np.sin(2 * np.pi * 440 * t)
+
+
+@pytest.mark.parametrize("length", [0.3, 7.77, 25.0])
+def test_chunked_stft_matches_a_whole_track_stft(length):
+    import librosa
+
+    y = _test_signal(length)
+    whole = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
+    chunked = features.chunked_stft(y, 2048, 512, lambda s, keep: np.abs(s[:, keep]), chunk_seconds=2.0)
+    assert chunked.shape == whole.shape
+    np.testing.assert_allclose(chunked, whole, rtol=1e-4, atol=1e-4)
+
+
+def test_chunked_onset_envelope_matches_librosa():
+    import librosa
+
+    y = _test_signal(25.0)
+    expected = librosa.onset.onset_strength(y=y, sr=44100, hop_length=beats.ONSET_HOP)
+    np.testing.assert_allclose(beats.onset_envelope(y, 44100), expected, rtol=1e-3, atol=1e-3)
+
+
+def test_chunked_features_match_whole_track_hpss():
+    """Chunk margins give the median filters enough context to match a single pass."""
+    import librosa
+
+    y = _test_signal(45.0)
+    spectral = features.compute(y, 44100)
+    stft = librosa.stft(y, n_fft=features.N_FFT, hop_length=features.HOP)
+    _, percussive = librosa.decompose.hpss(stft)
+    window = np.hanning(features.N_FFT + 1)[:-1]
+    scale = 2.0 / (features.N_FFT * np.sum(window**2)) / 0.5
+    melody = (librosa.fft_frequencies(sr=44100, n_fft=features.N_FFT) >= 200) & (
+        librosa.fft_frequencies(sr=44100, n_fft=features.N_FFT) < 4000
+    )
+    expected = ((np.abs(percussive) ** 2) * scale)[melody].sum(axis=0)
+    assert spectral.num_frames == stft.shape[1]
+    np.testing.assert_allclose(spectral.melody_percussive, expected, rtol=1e-3, atol=1e-6)

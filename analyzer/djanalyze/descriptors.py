@@ -4,9 +4,11 @@ Scores map raw measurements through fixed reference ranges (REFERENCE), not
 per-track normalisation, so a 0.8 bass section means the same in every track.
 The raw values are returned too and stored in the analysis file.
 
-Calibration: REFERENCE was set against the synthetic test clips
-(test-audio/clips.json). It still needs checking against a sample of real tracks,
-which the spec schedules for M1.
+Calibration: REFERENCE was first set against the synthetic test clips
+(test-audio/clips.json). The rhythm ranges were then reset against real
+recordings: dance and drum & bass, pop, ragtime, orchestral, solo trumpet and
+tempo-drifting material. With the first ranges a steady four-on-the-floor bar
+scored about 0.6 and real dance tracks about 0.3.
 """
 
 from __future__ import annotations
@@ -17,10 +19,12 @@ import numpy as np
 
 from .features import Spectral, to_db
 
-BASS_CUTOFF_HZ = 150.0
-HIGH_CUTOFF_HZ = 5000.0
-MELODY_BAND_HZ = (200.0, 4000.0)
-GRID_TOLERANCE_SECONDS = 0.03
+# Rhythm periodicity: the onset envelope is smoothed by this many frames
+# (about 17 ms) and compared with itself at lags within this many frames of a
+# beat, half a bar and a bar, so human timing and frame rounding do not count
+# as irregular.
+PERIODICITY_SMOOTHING_FRAMES = 1.5
+PERIODICITY_LAG_TOLERANCE_FRAMES = 1
 
 
 @dataclass(frozen=True)
@@ -34,7 +38,8 @@ class Range:
 
 # Raw value that maps to 0 and to 1 for each quality.
 REFERENCE = {
-    "rhythm_onset": Range(0.0, 1.5),  # mean percussive onset strength per frame
+    "rhythm_onset": Range(0.2, 0.9),  # mean percussive onset strength per frame
+    "rhythm_periodicity": Range(0.1, 0.8),  # onset envelope autocorrelation at beat and bar lags
     "bass_db": Range(-45.0, -5.0),  # dBFS, energy below 150 Hz
     "high_db": Range(-60.0, -20.0),  # dBFS, energy above 5 kHz
     "melody_db": Range(-50.0, -12.0),  # dBFS, harmonic energy 200 Hz – 4 kHz
@@ -64,27 +69,51 @@ class BarDescriptors:
 def _percussive_onsets(spectral: Spectral) -> np.ndarray:
     import librosa
 
-    mel = librosa.feature.melspectrogram(S=spectral.percussive, sr=spectral.sr, n_mels=64)
-    return librosa.onset.onset_strength(S=librosa.power_to_db(mel, ref=1.0), sr=spectral.sr)
+    return librosa.onset.onset_strength(S=spectral.percussive_mel_db, sr=spectral.sr)
 
 
-def _regularity(onsets: np.ndarray, frame_seconds: float, frames: slice, grid: np.ndarray) -> float:
-    """How much of the bar's onset energy lands near 8th-note grid positions.
+def _smoothed(onsets: np.ndarray) -> np.ndarray:
+    from scipy.ndimage import gaussian_filter1d
 
-    Rescaled so onsets spread evenly in time score 0 and onsets only on the grid
-    score 1.
+    return gaussian_filter1d(onsets.astype(float), PERIODICITY_SMOOTHING_FRAMES)
+
+
+def _periodicity(envelope: np.ndarray, frame_seconds: float, start: float, end: float, period: float) -> float:
+    """How strongly the onsets around a bar repeat every beat, half bar or bar.
+
+    The normalised autocorrelation of the (smoothed, mean-removed) onset
+    envelope over the bar and one bar either side, at the best of those lags:
+    near 1 for a pattern that repeats, near 0 for onsets with no steady pulse.
+    It needs the beat period but not the grid's phase, so a grid a few
+    milliseconds off does not lower it.
     """
-    values = onsets[frames]
-    total = float(values.sum())
-    if total <= 0 or len(grid) == 0:
+    if period <= 0 or end <= start:
         return 0.0
-    times = (np.arange(frames.start, frames.start + len(values))) * frame_seconds
-    near = np.abs(times[:, None] - grid[None, :]).min(axis=1) <= GRID_TOLERANCE_SECONDS
-    on_grid = float(values[near].sum()) / total
-    coverage = float(np.mean(near))
-    if coverage >= 1.0:
-        return 1.0
-    return float(np.clip((on_grid - coverage) / (1.0 - coverage), 0.0, 1.0))
+    length = end - start
+    first = max(0, int((start - length) / frame_seconds))
+    last = min(len(envelope), int((end + length) / frame_seconds) + 1)
+    x = envelope[first:last] - envelope[first:last].mean()
+    power = float(np.dot(x, x))
+    if power <= 0:
+        return 0.0
+    best = 0.0
+    for beats in (1, 2, 4):
+        centre = int(round(beats * period / frame_seconds))
+        for lag in range(centre - PERIODICITY_LAG_TOLERANCE_FRAMES, centre + PERIODICITY_LAG_TOLERANCE_FRAMES + 1):
+            if 0 < lag < len(x):
+                # Scaled up for the shorter overlap so long lags are not penalised.
+                r = float(np.dot(x[:-lag], x[lag:])) / power * len(x) / (len(x) - lag)
+                best = max(best, r)
+    return float(np.clip(best, 0.0, 1.0))
+
+
+def _local_period(beats: np.ndarray, start: float, end: float) -> float:
+    """Median beat gap around a bar, so variable-tempo tracks use their local tempo."""
+    length = end - start
+    near = beats[(beats >= start - length) & (beats <= end + length)]
+    if len(near) < 2:
+        near = beats
+    return float(np.median(np.diff(near))) if len(near) > 1 else 0.0
 
 
 def _chroma_clarity(chroma: np.ndarray) -> float:
@@ -105,50 +134,39 @@ def compute(
     salience: np.ndarray | None = None,
 ) -> BarDescriptors:
     """Score every bar. `salience` is an optional per-frame pitch salience (Essentia)."""
-    import librosa
-
     onsets = _percussive_onsets(spectral)
-    chroma = librosa.feature.chroma_stft(S=spectral.harmonic, sr=spectral.sr)
-    bass_band = spectral.band(0.0, BASS_CUTOFF_HZ)
-    high_band = spectral.band(HIGH_CUTOFF_HZ, spectral.sr)
-    melody_band = spectral.band(*MELODY_BAND_HZ)
-
-    # 8th-note positions across the track.
-    if len(beats) > 1:
-        eighths = np.sort(np.concatenate([beats, (beats[:-1] + beats[1:]) / 2]))
-    else:
-        eighths = beats
+    envelope = _smoothed(onsets)
+    total_power = spectral.total
 
     out = BarDescriptors()
     for start, end in bar_spans:
         frames = spectral.frames(start, end)
-        power = spectral.power[:, frames]
-        harmonic = spectral.harmonic[:, frames]
-        percussive = spectral.percussive[:, frames]
 
         onset_strength = float(onsets[frames].mean()) if onsets[frames].size else 0.0
-        regularity = _regularity(onsets, spectral.frame_seconds, frames, eighths[(eighths >= start) & (eighths < end)])
-        bass_db = float(to_db(power[bass_band].sum(axis=0).mean()))
-        high_db = float(to_db(power[high_band].sum(axis=0).mean()))
-        melody_power = harmonic[melody_band].sum(axis=0).mean()
+        periodicity = _periodicity(envelope, spectral.frame_seconds, start, end, _local_period(beats, start, end))
+        bass_db = float(to_db(spectral.bass[frames].mean()))
+        high_db = float(to_db(spectral.high[frames].mean()))
+        melody_power = spectral.melody_harmonic[frames].mean()
         melody_db = float(to_db(melody_power))
 
         if salience is not None:
             bar_salience = float(np.clip(np.mean(salience[frames]) if salience[frames].size else 0.0, 0.0, 1.0))
         else:
             # Without Essentia: share of the band's energy that is harmonic.
-            total = melody_power + percussive[melody_band].sum(axis=0).mean()
+            total = melody_power + spectral.melody_percussive[frames].mean()
             bar_salience = float(melody_power / total) if total > 0 else 0.0
-        clarity = _chroma_clarity(chroma[:, frames])
+        clarity = _chroma_clarity(spectral.harmonic_chroma[:, frames])
 
-        out.rhythm.append(REFERENCE["rhythm_onset"].score(onset_strength) * regularity)
+        out.rhythm.append(
+            REFERENCE["rhythm_onset"].score(onset_strength) * REFERENCE["rhythm_periodicity"].score(periodicity)
+        )
         out.bass.append(REFERENCE["bass_db"].score(bass_db))
         out.high.append(REFERENCE["high_db"].score(high_db))
         out.melody.append(REFERENCE["melody_db"].score(melody_db) * (0.5 * clarity + 0.5 * bar_salience))
-        out.energy.append(REFERENCE["energy_db"].score(float(to_db(power.sum(axis=0).mean()))))
+        out.energy.append(REFERENCE["energy_db"].score(float(to_db(total_power[frames].mean()))))
 
         out.raw["rhythmOnsetStrength"].append(onset_strength)
-        out.raw["rhythmRegularity"].append(regularity)
+        out.raw["rhythmRegularity"].append(periodicity)
         out.raw["bassDb"].append(bass_db)
         out.raw["highDb"].append(high_db)
         out.raw["melodyDb"].append(melody_db)

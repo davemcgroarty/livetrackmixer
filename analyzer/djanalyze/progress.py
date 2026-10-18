@@ -13,13 +13,14 @@ from typing import Any, TextIO
 # Share of the whole run each stage takes, in pipeline order.
 STAGE_WEIGHTS = {
     "hash": 0.02,
-    "decode": 0.08,
-    "beats": 0.30,
-    "structure": 0.10,
-    "descriptors": 0.25,
-    "key": 0.15,
-    "waveform": 0.05,
-    "write": 0.05,
+    "decode": 0.05,
+    "spectrum": 0.50,
+    "beats": 0.25,
+    "structure": 0.05,
+    "descriptors": 0.05,
+    "key": 0.04,
+    "waveform": 0.02,
+    "write": 0.02,
 }
 
 

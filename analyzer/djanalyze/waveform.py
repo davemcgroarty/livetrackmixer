@@ -33,7 +33,7 @@ def compute(mono: np.ndarray, sample_rate: int, samples_per_point: int = SAMPLES
     counts = np.full(points, samples_per_point, dtype=np.float64)
     counts[-1] = len(mono) - (points - 1) * samples_per_point
     peak = np.abs(blocks).max(axis=1)
-    rms = np.sqrt((blocks.astype(np.float64) ** 2).sum(axis=1) / counts)
+    rms = np.sqrt(np.einsum("ij,ij->i", blocks, blocks, dtype=np.float64) / counts)
     return Overview(sample_rate, samples_per_point, peak.astype(np.float32), rms.astype(np.float32))
 
 

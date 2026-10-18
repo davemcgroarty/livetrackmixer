@@ -6,11 +6,51 @@ add_library(djmix_core STATIC
     Source/analysis/AnalysisLoader.cpp
     Source/analysis/WaveformFile.h
     Source/analysis/WaveformFile.cpp
+    Source/analysis/AnalyzerProtocol.h
+    Source/analysis/AnalyzerProtocol.cpp
+    Source/io/ProjectFile.h
+    Source/io/ProjectFile.cpp
+    Source/engine/Mp3Gapless.h
+    Source/engine/Mp3Gapless.cpp
+    Source/engine/OutputRouting.h
+    Source/engine/OutputRouting.cpp
     Source/engine/RealtimeGuard.h
     Source/engine/RealtimeGuard.cpp
+    Source/library/Camelot.h
+    Source/library/Camelot.cpp
+    Source/library/ImportScanner.h
+    Source/library/ImportScanner.cpp
+    Source/library/LibraryDatabase.h
+    Source/library/LibraryDatabase.cpp
+    Source/library/LibraryFilter.h
+    Source/library/LibraryFilter.cpp
+    Source/library/TrackCatalog.h
+    Source/library/TrackCatalog.cpp
+    Source/library/TrackColours.h
+    Source/library/TrackColours.cpp
+    Source/library/TrackOverrides.h
+    Source/library/TrackOverrides.cpp
+    Source/model/BeatMap.h
+    Source/model/BeatMap.cpp
+    Source/model/Project.h
+    Source/model/Project.cpp
+    Source/model/ProjectEdits.h
+    Source/model/ProjectEdits.cpp
+    Source/model/Snap.h
+    Source/model/Snap.cpp
+    Source/view/EffectiveAnalysis.h
+    Source/view/EffectiveAnalysis.cpp
+    Source/view/TapTempo.h
+    Source/view/TapTempo.cpp
+    Source/view/TrackStructure.h
+    Source/view/TrackStructure.cpp
+    Source/view/ViewRange.h
+    Source/view/ViewRange.cpp
+    Source/view/WaveformPyramid.h
+    Source/view/WaveformPyramid.cpp
 )
 target_include_directories(djmix_core PUBLIC Source)
-target_link_libraries(djmix_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(djmix_core PUBLIC nlohmann_json::nlohmann_json PRIVATE SQLiteCpp)
 target_compile_features(djmix_core PUBLIC cxx_std_20)
 
 if(MSVC)
@@ -23,6 +63,43 @@ if(NOT DJMIX_BUILD_APP)
     return()
 endif()
 
+# Non-UI code that needs JUCE (juce_core). JUCE modules compile into each
+# target that links them, so these sources go into the app and the app tests
+# directly rather than into a shared library.
+set(DJMIX_SERVICE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/analysis/AnalyzerRunner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ArrangementPlayer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ArrangementPlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AudioEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AudioEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AuditionController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/AuditionController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ClipRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/ClipRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/CuePlayer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/CuePlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/MasterPlayer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/MasterPlayer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/PlaybackSnapshot.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/RenderCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/RenderCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/TrackDecoder.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/engine/TrackDecoder.cpp
+)
+set(DJMIX_SERVICE_SOURCES ${DJMIX_SERVICE_SOURCES} PARENT_SCOPE) # for app/Tests
+
+# UI components the app tests draw into images.
+set(DJMIX_VIEW_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/ArrangementView.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/ArrangementView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TransportBar.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TransportBar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TrackView.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TrackView.cpp
+)
+set(DJMIX_VIEW_SOURCES ${DJMIX_VIEW_SOURCES} PARENT_SCOPE)
+
 juce_add_gui_app(DJMixer
     PRODUCT_NAME "DJ Mixer"
     COMPANY_NAME "livetrackmixer"
@@ -31,12 +108,25 @@ juce_add_gui_app(DJMixer
 )
 
 target_sources(DJMixer PRIVATE
+    ${DJMIX_SERVICE_SOURCES}
+    ${DJMIX_VIEW_SOURCES}
     Source/Main.cpp
+    Source/AppSettings.h
+    Source/AppSettings.cpp
+    Source/AudioOutput.h
+    Source/AudioOutput.cpp
+    Source/library/LibraryController.h
+    Source/library/LibraryController.cpp
+    Source/ui/LibraryPanel.h
+    Source/ui/LibraryPanel.cpp
     Source/ui/MainComponent.h
     Source/ui/MainComponent.cpp
+    Source/ui/SettingsComponent.h
+    Source/ui/SettingsComponent.cpp
 )
 
 target_compile_definitions(DJMixer PRIVATE
+    JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:DJMixer,JUCE_PRODUCT_NAME>"
@@ -47,7 +137,9 @@ target_compile_definitions(DJMixer PRIVATE
 target_link_libraries(DJMixer
     PRIVATE
         djmix_core
+        rubberband
         juce::juce_audio_utils
+        juce::juce_data_structures
         juce::juce_audio_formats
         juce::juce_dsp
         juce::juce_gui_extra
