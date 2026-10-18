@@ -23,8 +23,9 @@ validate against it.
 | M2a · Library: import, background analysis, track table | Done |
 | M2b · Track view: waveform, beat/bar/phrase grid, sections, content cells | Done |
 | M2c · Audition on Cue: sections, phrases and tracks; Master/Cue routing | Done |
-| M3 · Grid and section editing | Next |
-| M4–M6 | Not started |
+| M3 · Grid and section editing, saved as overrides, with undo | Done |
+| M4 · Arrangement playback | Next |
+| M5–M6 | Not started |
 
 On the synthetic test clips, BPM is within ±0.02 and downbeats are within 13 ms
 of the reference. The M1 targets are ±0.5 BPM and 30 ms.
@@ -119,6 +120,35 @@ first 5 ms, so the loop is exactly as long as the section and keeps time.
 
 The selected track is decoded in the background as soon as you pick it, so
 clicks play at once. A playhead shows where you are.
+
+**Correcting the analysis.** When the beat grid or sections are wrong, fix
+them in the Track view. Right-click for the edit menu.
+
+The grid:
+- **Downbeat:** make the beat under the pointer the downbeat, with the menu or
+  **D**.
+- **Nudge:** move the whole grid 5 ms with **Alt+Left/Right**, or 1 ms with
+  **Shift** as well. **Alt-drag** in the waveform moves the grid with the
+  pointer, to lay a beat line on a hit.
+- **Tempo:** halve or double the BPM, type a BPM, or tap **T** in time (at
+  least four taps).
+- **Reset grid** returns to the analysis.
+
+Sections:
+- **Split:** start a section at the bar you clicked.
+- **Merge:** join a section with the next one.
+- **Move:** drag a boundary in the section strip. It snaps to bars.
+- **Reset sections** returns to the analysis.
+
+Phrases follow the new sections. Cmd/Ctrl+Z undoes and Cmd/Ctrl+Shift+Z (or
+Ctrl+Y) redoes.
+
+Edits are saved in the library as overrides on top of the analysis, so they
+survive a restart and analysing the track again. Section starts are stored as
+times, so after a grid edit they stay where the music changes and snap to the
+nearest bar of the new grid. An edited track shows **(edited)** next to its
+BPM. The Library shows the edited BPM and filters by it. **Check beats** goes
+once the grid has been corrected.
 
 **Audio output** is set in **Settings...**: the device, which outputs carry
 Master and Cue, and the Cue volume. **Test cue** beeps on the Cue outputs.

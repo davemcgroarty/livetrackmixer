@@ -73,7 +73,7 @@ void TrackView::showTrack (const TrackRecord* track)
         return;
     }
 
-    const Shown next { track->id, track->analysisFile, track->analyzerVersion, track->status, track->colour };
+    const Shown next { track->id, track->analysisFile, track->analyzerVersion, track->status, track->colour, track->overrides };
     if (shown && *shown == next)
         return;
 
@@ -97,6 +97,8 @@ void TrackView::showTrack (const TrackRecord* track)
 
     if (sameAnalysis)
     {
+        if (track->overrides != overrides)
+            setOverrides (track->overrides);
         repaint();
         return;
     }
@@ -131,6 +133,7 @@ void TrackView::showTrack (const TrackRecord* track)
     const auto keepStatus = status;
     showAnalysis (analysis, *waveform, colour, title, artist);
     status = keepStatus;
+    setOverrides (track->overrides);
     if (keep)
         showRange (keep->start(), keep->span());
 }
@@ -141,6 +144,10 @@ void TrackView::showAnalysis (const TrackAnalysis& analysis,
                               const juce::String& trackTitle,
                               const juce::String& trackArtist)
 {
+    base = analysis;
+    overrides = {};
+    preview.reset();
+    taps.reset();
     structure = TrackStructure (analysis);
     pyramid = WaveformPyramid (waveform);
     colour = trackColour;
@@ -155,6 +162,121 @@ void TrackView::showAnalysis (const TrackAnalysis& analysis,
     range.setWidth (waveArea.getWidth());
     scrollBar.setVisible (true);
     rangeChanged();
+}
+
+void TrackView::setOverrides (const TrackOverrides& next)
+{
+    overrides = next;
+    preview.reset();
+    applyOverrides();
+}
+
+void TrackView::applyOverrides()
+{
+    if (! loaded)
+        return;
+    structure = TrackStructure (effectiveAnalysis (base, preview.value_or (overrides)));
+    repaint();
+}
+
+void TrackView::commit (TrackOverrides next, bool continuing)
+{
+    // Shown at once; the library saves it and echoes it back through showTrack.
+    preview.reset();
+    if (next == overrides)
+    {
+        applyOverrides();
+        return;
+    }
+    overrides = next;
+    applyOverrides();
+    if (onEditOverrides)
+        onEditOverrides (next, continuing);
+}
+
+int TrackView::boundaryNear (float x) const
+{
+    const auto& sections = structure.data().sections;
+    for (size_t i = 1; i < sections.size(); ++i)
+        if (std::abs (timeToX (sections[i].start) - x) <= 5.0f)
+            return static_cast<int> (i);
+    return -1;
+}
+
+void TrackView::showEditMenu (juce::Point<float> position)
+{
+    if (! loaded)
+        return;
+    const double time = timeAt (position.x);
+    const auto& e = structure.data();
+    const int section = structure.sectionAt (time);
+    const int bar = structure.barAt (time);
+    const bool gridEdited = ! overrides.grid.isEmpty();
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Grid");
+    auto withShortcut = [] (const juce::String& text, const juce::String& shortcut, std::function<void()> action)
+    {
+        juce::PopupMenu::Item item (text);
+        item.shortcutKeyDescription = shortcut;
+        item.action = std::move (action);
+        return item;
+    };
+    menu.addItem (withShortcut ("Make this beat the downbeat", "D", [this, time] { commit (edits::setDownbeat (base, overrides, time)); }));
+    menu.addItem (withShortcut ("Nudge grid earlier (5 ms)", "Alt+Left", [this] { commit (edits::nudge (overrides, -0.005)); }));
+    menu.addItem (withShortcut ("Nudge grid later (5 ms)", "Alt+Right", [this] { commit (edits::nudge (overrides, 0.005)); }));
+    menu.addItem ("Halve BPM", [this] { commit (edits::scaleBpm (base, overrides, 0.5)); });
+    menu.addItem ("Double BPM", [this] { commit (edits::scaleBpm (base, overrides, 2.0)); });
+    menu.addItem ("Set BPM...", [this] { askForBpm(); });
+    menu.addItem ("Reset grid to the analysis", gridEdited, false, [this] { commit (edits::resetGrid (overrides)); });
+
+    menu.addSectionHeader ("Sections");
+    if (bar >= 0)
+    {
+        // At the start of the bar clicked, as the item says.
+        const double barStart = structure.barStart (bar);
+        menu.addItem ("Start a section at bar " + juce::String (bar + 1),
+                      bar > 0 && ! structure.startsSection (bar),
+                      false,
+                      [this, barStart] { commit (edits::splitSection (base, overrides, barStart)); });
+    }
+    if (section >= 0)
+        menu.addItem ("Merge with the next section", static_cast<size_t> (section) + 1 < e.sections.size(), false,
+                      [this, section] { commit (edits::mergeWithNext (base, overrides, section)); });
+    menu.addItem ("Reset sections to the analysis", overrides.sectionStarts.has_value(), false,
+                  [this] { commit (edits::resetSections (overrides)); });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+void TrackView::askForBpm()
+{
+    auto* window = new juce::AlertWindow ("Set BPM", "The track's tempo, for a constant grid from its first downbeat.",
+                                          juce::MessageBoxIconType::NoIcon, this);
+    window->addTextEditor ("bpm", juce::String (structure.data().bpm, 2), "BPM");
+    window->addButton ("Set", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<TrackView> self (this);
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([self, window] (int result)
+    {
+        const auto bpm = window->getTextEditorContents ("bpm").getDoubleValue();
+        if (self != nullptr && result == 1 && bpm >= 20.0 && bpm <= 400.0)
+            self->commit (edits::setBpm (self->overrides, bpm));
+    }), true);
+}
+
+void TrackView::tapTempo()
+{
+    const auto bpm = taps.tap (juce::Time::getMillisecondCounterHiRes() / 1000.0);
+    if (taps.count() == 1)
+        tapping = false; // a new count
+    if (bpm)
+    {
+        // All the taps of one count make one undo step.
+        const bool continuing = tapping;
+        tapping = true;
+        commit (edits::setBpm (overrides, std::round (*bpm * 100.0) / 100.0), continuing);
+    }
 }
 
 void TrackView::showMessage (const juce::String& text)
@@ -291,6 +413,8 @@ void TrackView::paintHeader (juce::Graphics& g, juce::Rectangle<int> area)
     {
         const auto& a = structure.data();
         details << juce::String (a.bpm, 2) << " BPM";
+        if (! overrides.isEmpty())
+            details << " (edited)";
         if (a.tempoVariable)
             details << " (variable)";
         if (! a.key.camelot.empty())
@@ -298,7 +422,7 @@ void TrackView::paintHeader (juce::Graphics& g, juce::Rectangle<int> area)
     }
 
     juce::String warning = status;
-    if (loaded && warning.isEmpty() && structure.data().beatConfidence < beatConfidenceWarning)
+    if (loaded && warning.isEmpty() && overrides.grid.isEmpty() && structure.data().beatConfidence < beatConfidenceWarning)
         warning = "Check beats";
 
     g.setFont (13.0f);
@@ -626,6 +750,8 @@ void TrackView::mouseMove (const juce::MouseEvent& e)
     if (! loaded)
         return;
     hover = e.position;
+    const bool overBoundary = stripArea.contains (e.getPosition()) && boundaryNear (e.position.x) > 0;
+    setMouseCursor (overBoundary ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
     repaint();
 }
 
@@ -640,8 +766,22 @@ void TrackView::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     if (! loaded)
         return;
-    dragAnchorTime = range.xToTime (e.position.x - waveArea.getX());
+    if (e.mods.isPopupMenu())
+    {
+        showEditMenu (e.position);
+        return;
+    }
+    dragAnchorTime = timeAt (e.position.x);
     dragging = false;
+
+    // What a drag will do: move a section boundary, move the grid, or pan.
+    dragSection = stripArea.contains (e.getPosition()) ? boundaryNear (e.position.x) : -1;
+    if (dragSection > 0)
+        dragKind = DragKind::boundary;
+    else if (e.mods.isAltDown() && waveArea.contains (e.getPosition()))
+        dragKind = DragKind::grid;
+    else
+        dragKind = DragKind::pan;
 }
 
 void TrackView::mouseDrag (const juce::MouseEvent& e)
@@ -651,17 +791,36 @@ void TrackView::mouseDrag (const juce::MouseEvent& e)
     if (! dragging && e.getDistanceFromDragStart() < 3)
         return;
     dragging = true;
-    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
-    // Keep the time grabbed under the pointer.
-    range.show (dragAnchorTime - (e.position.x - waveArea.getX()) / range.pixelsPerSecond(), range.span());
     hover = e.position;
-    rangeChanged();
+
+    switch (dragKind)
+    {
+        case DragKind::boundary:
+            // Snaps to bars as it goes.
+            preview = edits::moveSectionStart (base, overrides, dragSection, timeAt (e.position.x));
+            applyOverrides();
+            break;
+        case DragKind::grid:
+            // The grid follows the pointer, so a beat line can be laid on a hit.
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+            preview = edits::nudge (overrides, timeAt (e.position.x) - dragAnchorTime);
+            applyOverrides();
+            break;
+        case DragKind::pan:
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            // Keep the time grabbed under the pointer.
+            range.show (dragAnchorTime - (e.position.x - waveArea.getX()) / range.pixelsPerSecond(), range.span());
+            rangeChanged();
+            break;
+    }
 }
 
 void TrackView::mouseUp (const juce::MouseEvent& e)
 {
     const bool wasDrag = dragging;
     dragging = false;
+    if (wasDrag && preview)
+        commit (*preview);
     setMouseCursor (juce::MouseCursor::NormalCursor);
     hover = e.position;
     repaint();
@@ -834,6 +993,26 @@ bool TrackView::keyPressed (const juce::KeyPress& key)
         return false;
     const auto centre = static_cast<float> (waveArea.getCentreX());
     const auto c = key.getTextCharacter();
+
+    // Grid edits.
+    const auto code = key.getKeyCode();
+    if (key.getModifiers().isAltDown() && (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey))
+    {
+        const double step = key.getModifiers().isShiftDown() ? 0.001 : 0.005;
+        commit (edits::nudge (overrides, code == juce::KeyPress::leftKey ? -step : step));
+        return true;
+    }
+    if ((c == 'd' || c == 'D') && hover && waveArea.contains (hover->toInt()))
+    {
+        commit (edits::setDownbeat (base, overrides, timeAt (hover->x)));
+        return true;
+    }
+    if (c == 't' || c == 'T')
+    {
+        tapTempo();
+        return true;
+    }
+
     if (c == '+' || c == '=')
         zoomAt (centre, 1.5);
     else if (c == '-' || c == '_')

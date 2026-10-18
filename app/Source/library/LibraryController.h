@@ -41,6 +41,9 @@ public:
     void removeTrack (int64_t id);
     void setColour (int64_t id, int colour);
 
+    // Hand corrections to a track's grid and sections.
+    void setOverrides (int64_t id, const TrackOverrides& overrides);
+
     void setAnalyzerExecutable (const std::filesystem::path& executable);
     const std::filesystem::path& analyzerExecutable() const { return analyzer; }
     const std::filesystem::path& cacheDirectory() const { return cacheDir; }

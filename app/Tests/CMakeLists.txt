@@ -6,6 +6,7 @@ add_executable(djmix_tests
     AnalysisSchemaTests.cpp
     AnalyzerProtocolTests.cpp
     CueModeTests.cpp
+    EditTests.cpp
     LibraryTests.cpp
     Mp3GaplessTests.cpp
     OutputRoutingTests.cpp

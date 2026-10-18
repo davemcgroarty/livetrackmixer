@@ -24,6 +24,12 @@ add_library(djmix_core STATIC
     Source/library/LibraryFilter.cpp
     Source/library/TrackColours.h
     Source/library/TrackColours.cpp
+    Source/library/TrackOverrides.h
+    Source/library/TrackOverrides.cpp
+    Source/view/EffectiveAnalysis.h
+    Source/view/EffectiveAnalysis.cpp
+    Source/view/TapTempo.h
+    Source/view/TapTempo.cpp
     Source/view/TrackStructure.h
     Source/view/TrackStructure.cpp
     Source/view/ViewRange.h

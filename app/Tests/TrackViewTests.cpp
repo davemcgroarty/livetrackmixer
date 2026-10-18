@@ -156,6 +156,13 @@ TEST_CASE ("The Track view draws a six-minute track within a 60 fps frame", "[ui
         // noisier than a desktop, so this only catches gross regressions.
         CHECK (ms < 50.0);
     }
+
+    // An edited track draws as quickly as an unedited one.
+    view.setOverrides (djmix::edits::splitSection (track.analysis, djmix::edits::nudge ({}, 0.01), 100.0));
+    view.showRange (0.0, 360.0);
+    const double ms = millisecondsPerPaint (view, image, 20);
+    WARN ("Track view, edited: " << ms << " ms per frame");
+    CHECK (ms < 50.0);
 }
 
 TEST_CASE ("The Track view explains a track it cannot show", "[ui][trackview]")
@@ -181,4 +188,46 @@ TEST_CASE ("The Track view explains a track it cannot show", "[ui][trackview]")
 
     view.showTrack (nullptr);
     CHECK_FALSE (view.hasAnalysis());
+}
+
+TEST_CASE ("The Track view edits the grid and hands the edit on to save", "[ui][trackview][edit]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    const LongTrack track;
+    TrackView view;
+    view.setSize (1600, 400);
+    view.showAnalysis (track.analysis, track.waveform, juce::Colour (0xff4f9fe0), "Long Track", "Artist");
+
+    std::optional<djmix::TrackOverrides> saved;
+    int edits = 0;
+    view.onEditOverrides = [&] (const djmix::TrackOverrides& o, bool)
+    {
+        saved = o;
+        ++edits;
+    };
+
+    // Alt+Right nudges the grid 5 ms later; Shift+Alt+Left 1 ms earlier.
+    CHECK (view.keyPressed (juce::KeyPress (juce::KeyPress::rightKey, juce::ModifierKeys::altModifier, 0)));
+    REQUIRE (saved);
+    CHECK (saved->grid.offsetSeconds == Approx (0.005));
+    CHECK (view.effective().beats.front() == Approx (track.analysis.beats.front() + 0.005));
+    CHECK (view.keyPressed (juce::KeyPress (juce::KeyPress::leftKey,
+                                            juce::ModifierKeys::altModifier | juce::ModifierKeys::shiftModifier, 0)));
+    CHECK (saved->grid.offsetSeconds == Approx (0.004));
+    CHECK (edits == 2);
+
+    // Plain arrows still scroll, and edit nothing.
+    view.showRange (100.0, 10.0);
+    CHECK (view.keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    CHECK (view.viewRange().start() > 100.0);
+    CHECK (edits == 2);
+
+    // Overrides from the library (say, an undo) replace the view's own.
+    djmix::TrackOverrides fromLibrary;
+    fromLibrary.grid.bpm = 125.0;
+    view.setOverrides (fromLibrary);
+    CHECK (view.effective().bpm == 125.0);
+    view.setOverrides ({});
+    CHECK (view.effective().beats == track.analysis.beats);
+
 }

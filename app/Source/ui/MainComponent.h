@@ -42,6 +42,7 @@ private:
     LibraryController& controller;
     AudioOutput& audio;
     AuditionController& audition;
+    juce::UndoManager undo; // grid and section edits
 
     LibraryPanel library;
     TrackView trackView;

@@ -7,11 +7,12 @@ bool LibraryFilter::matches (const TrackRecord& track) const
 {
     if (minBpm || maxBpm)
     {
-        if (! track.bpm)
+        const auto bpm = track.effectiveBpm();
+        if (! bpm)
             return false;
-        if (minBpm && *track.bpm < *minBpm)
+        if (minBpm && *bpm < *minBpm)
             return false;
-        if (maxBpm && *track.bpm > *maxBpm)
+        if (maxBpm && *bpm > *maxBpm)
             return false;
     }
 

@@ -31,12 +31,23 @@ TrackRecord readRecord (SQLite::Statement& row)
         t.beatConfidence = row.getColumn ("beat_confidence").getDouble();
     t.analysisFile = pathFromUtf8 (row.getColumn ("analysis_file").getString());
     t.analyzerVersion = row.getColumn ("analyzer_version").getString();
+
+    if (! row.getColumn ("override_bpm").isNull())
+        t.overrides.grid.bpm = row.getColumn ("override_bpm").getDouble();
+    if (! row.getColumn ("grid_offset_sec").isNull())
+        t.overrides.grid.offsetSeconds = row.getColumn ("grid_offset_sec").getDouble();
+    if (! row.getColumn ("downbeat_shift").isNull())
+        t.overrides.grid.downbeatShift = row.getColumn ("downbeat_shift").getInt();
+    if (! row.getColumn ("section_starts").isNull())
+        t.overrides.sectionStarts = sectionStartsFromJson (row.getColumn ("section_starts").getString());
     return t;
 }
 
 constexpr const char* selectColumns =
     "SELECT id, path, file_hash, title, artist, colour, status, error, bpm, key_name, camelot, "
-    "duration_sec, beat_confidence, analysis_file, analyzer_version FROM tracks";
+    "duration_sec, beat_confidence, analysis_file, analyzer_version, "
+    "override_bpm, grid_offset_sec, downbeat_shift, section_starts "
+    "FROM tracks LEFT JOIN track_overrides ON track_overrides.track_id = tracks.id";
 } // namespace
 
 std::string pathToUtf8 (const std::filesystem::path& path)
@@ -119,6 +130,20 @@ void LibraryDatabase::migrate()
         // version 1 read as unknown, so they are checked once more.
         db->exec ("ALTER TABLE tracks ADD COLUMN analyzer_version TEXT NOT NULL DEFAULT ''");
     }
+    if (version < 3)
+    {
+        // Hand corrections live apart from the analysis columns, which
+        // re-analysis overwrites.
+        db->exec (R"sql(
+            CREATE TABLE track_overrides (
+                track_id        INTEGER PRIMARY KEY REFERENCES tracks (id) ON DELETE CASCADE,
+                override_bpm    REAL,
+                grid_offset_sec REAL NOT NULL DEFAULT 0,
+                downbeat_shift  INTEGER NOT NULL DEFAULT 0,
+                section_starts  TEXT
+            );
+        )sql");
+    }
     db->exec ("PRAGMA user_version = " + std::to_string (schemaVersion));
     transaction.commit();
 }
@@ -141,7 +166,7 @@ std::optional<int64_t> LibraryDatabase::addTrack (const std::filesystem::path& p
 
 std::vector<TrackRecord> LibraryDatabase::allTracks() const
 {
-    SQLite::Statement query (*db, std::string (selectColumns) + " ORDER BY id");
+    SQLite::Statement query (*db, std::string (selectColumns) + " ORDER BY tracks.id");
     std::vector<TrackRecord> tracks;
     while (query.executeStep())
         tracks.push_back (readRecord (query));
@@ -150,7 +175,7 @@ std::vector<TrackRecord> LibraryDatabase::allTracks() const
 
 std::optional<TrackRecord> LibraryDatabase::track (int64_t id) const
 {
-    SQLite::Statement query (*db, std::string (selectColumns) + " WHERE id = ?");
+    SQLite::Statement query (*db, std::string (selectColumns) + " WHERE tracks.id = ?");
     query.bind (1, id);
     if (! query.executeStep())
         return std::nullopt;
@@ -197,6 +222,33 @@ void LibraryDatabase::setColour (int64_t id, int colour)
     update.bind (1, colour);
     update.bind (2, id);
     update.exec();
+}
+
+void LibraryDatabase::setOverrides (int64_t id, const TrackOverrides& o)
+{
+    if (o.isEmpty())
+    {
+        SQLite::Statement remove (*db, "DELETE FROM track_overrides WHERE track_id = ?");
+        remove.bind (1, id);
+        remove.exec();
+        return;
+    }
+
+    SQLite::Statement upsert (*db, R"sql(
+        INSERT OR REPLACE INTO track_overrides (track_id, override_bpm, grid_offset_sec, downbeat_shift, section_starts)
+        VALUES (?, ?, ?, ?, ?))sql");
+    upsert.bind (1, id);
+    if (o.grid.bpm)
+        upsert.bind (2, *o.grid.bpm);
+    else
+        upsert.bind (2);
+    upsert.bind (3, o.grid.offsetSeconds);
+    upsert.bind (4, o.grid.downbeatShift);
+    if (o.sectionStarts)
+        upsert.bind (5, sectionStartsToJson (*o.sectionStarts));
+    else
+        upsert.bind (5);
+    upsert.exec();
 }
 
 void LibraryDatabase::removeTrack (int64_t id)

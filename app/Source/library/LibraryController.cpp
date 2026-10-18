@@ -142,6 +142,12 @@ void LibraryController::setColour (int64_t id, int colour)
     reload();
 }
 
+void LibraryController::setOverrides (int64_t id, const TrackOverrides& overrides)
+{
+    database->setOverrides (id, overrides);
+    reload();
+}
+
 void LibraryController::setAnalyzerExecutable (const std::filesystem::path& executable)
 {
     analyzer = executable;

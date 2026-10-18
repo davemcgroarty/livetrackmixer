@@ -140,6 +140,48 @@ TEST_CASE ("The library database stores tracks and their analysis", "[library][d
     CHECK (reopened.allTracks().empty());
 }
 
+TEST_CASE ("Track overrides are saved apart from the analysis", "[library][database]")
+{
+    TempDir dir;
+    const auto file = dir.path / "library.sqlite";
+    int64_t id = 0;
+    TrackOverrides overrides;
+    overrides.grid.bpm = 124.5;
+    overrides.grid.offsetSeconds = -0.012;
+    overrides.grid.downbeatShift = 3;
+    overrides.sectionStarts = std::vector<double> { 0.25, 32.25 };
+    {
+        LibraryDatabase db (file);
+        id = *db.addTrack (dir.path / "a.flac", "A", "", 0);
+        db.setAnalysis (id, { "sha256:a", 124.0, "", "", 300.0, 0.9, dir.path / "a.json", "0.1.3" });
+        db.setOverrides (id, overrides);
+    }
+
+    // Saved, and kept when the track is analysed again.
+    LibraryDatabase db (file);
+    CHECK (db.track (id)->overrides == overrides);
+    CHECK (*db.track (id)->effectiveBpm() == Catch::Approx (124.5));
+    db.setAnalysis (id, { "sha256:a", 123.0, "", "", 300.0, 0.9, dir.path / "a.json", "0.1.4" });
+    CHECK (db.track (id)->overrides == overrides);
+    CHECK (*db.track (id)->bpm == Catch::Approx (123.0));
+    CHECK (db.allTracks().front().overrides == overrides);
+
+    // Grid only, then nothing: the row goes.
+    TrackOverrides gridOnly;
+    gridOnly.grid.downbeatShift = 1;
+    db.setOverrides (id, gridOnly);
+    CHECK (db.track (id)->overrides == gridOnly);
+    CHECK_FALSE (db.track (id)->overrides.sectionStarts);
+    db.setOverrides (id, {});
+    CHECK (db.track (id)->overrides.isEmpty());
+
+    // Removing the track removes its overrides.
+    db.setOverrides (id, overrides);
+    db.removeTrack (id);
+    SQLite::Database raw (pathToUtf8 (file), SQLite::OPEN_READONLY);
+    CHECK (raw.execAndGet ("SELECT COUNT(*) FROM track_overrides").getInt() == 0);
+}
+
 TEST_CASE ("The library migrates a version 1 database", "[library][database]")
 {
     TempDir dir;
@@ -178,6 +220,7 @@ TEST_CASE ("The library migrates a version 1 database", "[library][database]")
     CHECK (tracks[0].status == AnalysisStatus::ready);
     CHECK (*tracks[0].bpm == Catch::Approx (128.0));
     CHECK (tracks[0].analyzerVersion.empty());
+    CHECK (tracks[0].overrides.isEmpty());
 
     db.setAnalysis (tracks[0].id, { "sha256:a", 128.0, "", "", 1.0, 0.9, "/cache/a.json", "0.1.2" });
     CHECK (db.track (tracks[0].id)->analyzerVersion == "0.1.2");

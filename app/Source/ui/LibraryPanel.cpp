@@ -64,7 +64,7 @@ int compareTracks (const TrackRecord& a, const TrackRecord& b, int column)
         case 1: return a.colour - b.colour;
         case 2: return compareText (a.title, b.title);
         case 3: return compareText (a.artist, b.artist);
-        case 4: return compareOptional (a.bpm, b.bpm);
+        case 4: return compareOptional (a.effectiveBpm(), b.effectiveBpm());
         case 5:
         {
             const auto ka = parseCamelot (a.camelot), kb = parseCamelot (b.camelot);
@@ -245,8 +245,8 @@ void LibraryPanel::paintCell (juce::Graphics& g, int row, int columnId, int widt
             break;
 
         case bpmColumn:
-            if (t.bpm)
-                g.drawText (juce::String (*t.bpm, 1), text, juce::Justification::centredRight, false);
+            if (const auto bpm = t.effectiveBpm())
+                g.drawText (juce::String (*bpm, 1), text, juce::Justification::centredRight, false);
             break;
 
         case keyColumn:

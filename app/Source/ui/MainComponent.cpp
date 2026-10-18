@@ -5,6 +5,36 @@
 namespace djmix
 {
 
+namespace
+{
+// A grid or section edit to one track, undoable.
+class OverridesEdit final : public juce::UndoableAction
+{
+public:
+    OverridesEdit (LibraryController& c, int64_t id, TrackOverrides from, TrackOverrides to)
+        : controller (c), trackId (id), before (std::move (from)), after (std::move (to))
+    {
+    }
+
+    bool perform() override { return apply (after); }
+    bool undo() override { return apply (before); }
+
+private:
+    bool apply (const TrackOverrides& overrides)
+    {
+        // The track may have been removed since.
+        if (controller.findTrack (trackId) == nullptr)
+            return false;
+        controller.setOverrides (trackId, overrides);
+        return true;
+    }
+
+    LibraryController& controller;
+    int64_t trackId;
+    TrackOverrides before, after;
+};
+} // namespace
+
 MainComponent::MainComponent (AppSettings& s, LibraryController& c, AudioOutput& a, AuditionController& au)
     : settings (s), controller (c), audio (a), audition (au), library (c)
 {
@@ -30,6 +60,15 @@ MainComponent::MainComponent (AppSettings& s, LibraryController& c, AudioOutput&
             audition.play (track->id, track->path, start, end);
     };
     trackView.onStopAudition = [this] { audition.stop(); };
+    trackView.onEditOverrides = [this] (const TrackOverrides& next, bool continuing)
+    {
+        const auto* track = controller.findTrack (selectedTrack);
+        if (track == nullptr)
+            return;
+        if (! continuing)
+            undo.beginNewTransaction();
+        undo.perform (new OverridesEdit (controller, track->id, track->overrides, next));
+    };
     audition.setMode (settings.cueMode());
     trackView.setCueMode (settings.cueMode());
     trackView.onCycleCueMode = [this]
@@ -90,6 +129,22 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress::escapeKey)
     {
         audition.stop();
+        return true;
+    }
+
+    // Undo and redo grid and section edits: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z or Ctrl+Y.
+    const auto mods = key.getModifiers();
+    if (mods.isCommandDown() && (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z'))
+    {
+        if (mods.isShiftDown())
+            undo.redo();
+        else
+            undo.undo();
+        return true;
+    }
+    if (mods.isCommandDown() && (key.getKeyCode() == 'Y' || key.getKeyCode() == 'y'))
+    {
+        undo.redo();
         return true;
     }
     return false;

@@ -9,6 +9,8 @@
 #include "analysis/WaveformFile.h"
 #include "engine/CueMode.h"
 #include "library/LibraryDatabase.h"
+#include "view/EffectiveAnalysis.h"
+#include "view/TapTempo.h"
 #include "view/TrackStructure.h"
 #include "view/ViewRange.h"
 #include "view/WaveformPyramid.h"
@@ -28,6 +30,11 @@ namespace djmix
 //
 // Mouse wheel or pinch zooms around the pointer, shift-wheel or a sideways
 // swipe scrolls, dragging pans; + and - zoom, Home shows the whole track.
+//
+// Grid and section edits (M3) are hand corrections over the analysis
+// (TrackOverrides), sent to onEditOverrides to save: right-click for the edit
+// menu, Alt-drag to move the grid, drag a section boundary in the strip,
+// Alt+arrows to nudge, D to set the downbeat at the pointer, T to tap tempo.
 class TrackView final : public juce::Component,
                         public juce::TooltipClient,
                         private juce::ScrollBar::Listener
@@ -68,6 +75,17 @@ public:
     std::function<void()> onStopAudition;
     std::function<void()> onCycleCueMode;
 
+    // An edit to the grid or sections, to save (and undo). `continuing` is true
+    // for a later step of the same gesture (more tap-tempo taps), so it can join
+    // the same undo step.
+    std::function<void (const TrackOverrides& overrides, bool continuing)> onEditOverrides;
+
+    // Shows the track with these corrections (the analysis is kept as loaded).
+    void setOverrides (const TrackOverrides& overrides);
+    const TrackOverrides& getOverrides() const { return overrides; }
+    // The analysis with the corrections applied, as drawn.
+    const TrackAnalysis& effective() const { return structure.data(); }
+
     // What the cue mode button shows.
     void setCueMode (CueMode mode);
 
@@ -100,6 +118,7 @@ private:
         std::string analyzerVersion;
         AnalysisStatus status = AnalysisStatus::pending;
         int colour = -1;
+        TrackOverrides overrides;
 
         bool operator== (const Shown&) const = default;
     };
@@ -118,6 +137,14 @@ private:
     void paintCueModeIcon (juce::Graphics&, juce::Rectangle<float> area) const;
 
     void handleClick (juce::Point<float> position);
+    void showEditMenu (juce::Point<float> position);
+    void askForBpm();
+    void tapTempo();
+    // By value: callers pass *preview, which this clears.
+    void commit (TrackOverrides next, bool continuing = false);
+    void applyOverrides(); // rebuilds the structure from base + (preview or overrides)
+    int boundaryNear (float x) const; // a section (not the first) whose start is under x, or -1
+    double timeAt (float x) const { return range.xToTime (x - static_cast<float> (waveArea.getX())); }
     void requestAudition (double start, double end);
     juce::Rectangle<int> playheadArea (const Audition&) const;
     float timeToX (double seconds) const;
@@ -142,6 +169,21 @@ private:
     std::optional<juce::Point<float>> hover;
     double dragAnchorTime = 0.0;
     bool dragging = false;
+
+    // M3 editing.
+    enum class DragKind
+    {
+        pan,
+        grid,
+        boundary
+    };
+    TrackAnalysis base; // as analysed
+    TrackOverrides overrides;
+    std::optional<TrackOverrides> preview; // while a grid or boundary drag is under way
+    DragKind dragKind = DragKind::pan;
+    int dragSection = -1;
+    TapTempo taps;
+    bool tapping = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackView)
 };

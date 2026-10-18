@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "TrackOverrides.h"
+
 namespace SQLite
 {
 class Database;
@@ -43,6 +45,11 @@ struct TrackRecord
     std::optional<double> beatConfidence;
     std::filesystem::path analysisFile;
     std::string analyzerVersion; // of the djanalyze that wrote analysisFile; empty if not known
+
+    TrackOverrides overrides; // hand corrections to the grid and sections
+
+    // The tempo after any BPM override.
+    std::optional<double> effectiveBpm() const { return overrides.grid.bpm ? overrides.grid.bpm : bpm; }
 };
 
 struct AnalysisSummary
@@ -62,7 +69,7 @@ struct AnalysisSummary
 class LibraryDatabase
 {
 public:
-    static constexpr int schemaVersion = 2;
+    static constexpr int schemaVersion = 3;
 
     // Opens or creates the library at `file`, migrating older schemas.
     explicit LibraryDatabase (const std::filesystem::path& file);
@@ -84,6 +91,9 @@ public:
     void setStatus (int64_t id, AnalysisStatus status, const std::string& error = {});
     void setAnalysis (int64_t id, const AnalysisSummary& summary); // also sets status to ready
     void setColour (int64_t id, int colour);
+
+    // Hand corrections; kept when the track is analysed again, removed with it.
+    void setOverrides (int64_t id, const TrackOverrides& overrides);
     void removeTrack (int64_t id);
 
     // How many tracks use each palette colour.
