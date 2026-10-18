@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <tuple>
 
+#include "ArrangementView.h"
 #include "analysis/AnalysisLoader.h"
 #include "library/TrackColours.h"
 
@@ -904,6 +906,9 @@ void TrackView::mouseDown (const juce::MouseEvent& e)
     }
     dragAnchorTime = timeAt (e.position.x);
     dragging = false;
+    draggedOut = false;
+    mouseDownPosition = e.position;
+    rangeStartAtMouseDown = range.start();
 
     // What a drag will do: move a section boundary, move the grid, or pan.
     dragSection = stripArea.contains (e.getPosition()) ? boundaryNear (e.position.x) : -1;
@@ -917,7 +922,7 @@ void TrackView::mouseDown (const juce::MouseEvent& e)
 
 void TrackView::mouseDrag (const juce::MouseEvent& e)
 {
-    if (! loaded)
+    if (! loaded || draggedOut)
         return;
     if (! dragging && e.getDistanceFromDragStart() < 3)
         return;
@@ -938,6 +943,12 @@ void TrackView::mouseDrag (const juce::MouseEvent& e)
             applyOverrides();
             break;
         case DragKind::pan:
+            // Pulled down out of the view: it becomes a clip for the Arrangement.
+            if (e.position.y > static_cast<float> (getHeight()) + 4.0f && ! clipDescriptionAt (mouseDownPosition).isVoid())
+            {
+                startClipDrag();
+                return;
+            }
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
             // Keep the time grabbed under the pointer.
             range.show (dragAnchorTime - (e.position.x - waveArea.getX()) / range.pixelsPerSecond(), range.span());
@@ -948,8 +959,9 @@ void TrackView::mouseDrag (const juce::MouseEvent& e)
 
 void TrackView::mouseUp (const juce::MouseEvent& e)
 {
-    const bool wasDrag = dragging;
+    const bool wasDrag = dragging || draggedOut;
     dragging = false;
+    draggedOut = false;
     if (wasDrag && preview)
         commit (*preview);
     setMouseCursor (juce::MouseCursor::NormalCursor);
@@ -1005,6 +1017,69 @@ juce::String TrackView::getTooltip()
         return "What a cue does at the end of its section or phrase: play once and stop, loop, "
                "or continue through the track. Click to change.";
     return {};
+}
+
+juce::var TrackView::clipDescriptionAt (juce::Point<float> position) const
+{
+    if (! loaded || ! shown)
+        return {};
+    const auto& a = structure.data();
+    const int numBars = structure.numBars();
+    const double time = range.xToTime (position.x - waveArea.getX());
+
+    // The first and last bar it covers (0-based).
+    int first = -1, last = -1;
+    if (stripArea.toFloat().contains (position))
+    {
+        const int section = structure.sectionAt (time);
+        if (section < 0)
+            return {};
+        const auto& s = a.sections[static_cast<size_t> (section)];
+        first = s.startBar - 1;
+        last = std::min (s.startBar - 1 + s.lengthBars, numBars) - 1;
+    }
+    else if (waveArea.toFloat().contains (position))
+    {
+        const int bar = structure.barAt (time);
+        if (bar < 0)
+            return {};
+        std::tie (first, last) = structure.phraseAround (bar);
+    }
+    if (first < 0 || last < first || last >= numBars)
+        return {};
+
+    const double startBeat = a.bars[static_cast<size_t> (first)].firstBeat;
+    const double endBeat = static_cast<size_t> (last + 1) < a.bars.size() ? a.bars[static_cast<size_t> (last + 1)].firstBeat
+                                                                          : a.bars[static_cast<size_t> (last)].firstBeat + 4.0;
+    const auto label = "Bars " + juce::String (first + 1) + "-" + juce::String (last + 1);
+    return ArrangementView::clipDragDescription (shown->id, startBeat, endBeat - startBeat, label);
+}
+
+void TrackView::startClipDrag()
+{
+    auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this);
+    const auto description = clipDescriptionAt (mouseDownPosition);
+    if (container == nullptr || description.isVoid())
+        return;
+
+    // Put back any panning on the way out.
+    range.show (rangeStartAtMouseDown, range.span());
+    rangeChanged();
+    draggedOut = true;
+    dragging = false;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+
+    // A small block in the track colour, with the bars it holds.
+    juce::Image image (juce::Image::ARGB, 120, 28, true);
+    {
+        juce::Graphics g (image);
+        g.setColour (colour.withAlpha (0.85f));
+        g.fillRoundedRectangle (image.getBounds().toFloat(), 4.0f);
+        g.setColour (juce::Colours::white);
+        g.setFont (12.0f);
+        g.drawText (description.getProperty ("label", "").toString(), image.getBounds().reduced (6, 0), juce::Justification::centredLeft);
+    }
+    container->startDragging (description, this, juce::ScaledImage (image), true);
 }
 
 void TrackView::handleClick (juce::Point<float> position, juce::ModifierKeys mods)

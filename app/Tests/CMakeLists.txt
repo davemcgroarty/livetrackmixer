@@ -10,7 +10,9 @@ add_executable(djmix_tests
     LibraryTests.cpp
     Mp3GaplessTests.cpp
     OutputRoutingTests.cpp
+    ProjectEditTests.cpp
     ProjectTests.cpp
+    TrackCatalogTests.cpp
     WaveformFileTests.cpp
     RealtimeGuardTests.cpp
     ViewTests.cpp
@@ -53,6 +55,7 @@ target_sources(djmix_app_tests PRIVATE
     AllocationCounter.cpp
     AnalyzerRunnerTests.cpp
     ArrangementTests.cpp
+    ArrangementViewTests.cpp
     AuditionTests.cpp
     ClipRendererTests.cpp
     CuePlayerTests.cpp

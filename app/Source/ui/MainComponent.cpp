@@ -1,6 +1,10 @@
 #include "MainComponent.h"
 
+#include <variant>
+
 #include "SettingsComponent.h"
+#include "io/ProjectFile.h"
+#include "model/ProjectEdits.h"
 
 namespace djmix
 {
@@ -33,6 +37,36 @@ private:
     int64_t trackId;
     TrackOverrides before, after;
 };
+
+// An arrangement edit, undoable: the whole project before and after.
+class ProjectEdit final : public juce::UndoableAction
+{
+public:
+    using Apply = std::function<void (const Project&)>;
+    ProjectEdit (Apply a, Project from, Project to) : apply (std::move (a)), before (std::move (from)), after (std::move (to)) {}
+
+    bool perform() override
+    {
+        apply (after);
+        return true;
+    }
+    bool undo() override
+    {
+        apply (before);
+        return true;
+    }
+
+private:
+    Apply apply;
+    Project before, after;
+};
+
+constexpr int saveDelayMs = 1000;
+
+juce::String fromUtf8 (const std::string& text)
+{
+    return juce::String::fromUTF8 (text.c_str());
+}
 } // namespace
 
 MainComponent::MainComponent (AppSettings& s, LibraryController& c, AudioOutput& a, AuditionController& au)
@@ -41,7 +75,66 @@ MainComponent::MainComponent (AppSettings& s, LibraryController& c, AudioOutput&
     addAndMakeVisible (library);
     addAndMakeVisible (divider);
     addAndMakeVisible (trackView);
+    addAndMakeVisible (transport);
     addAndMakeVisible (arrangement);
+
+    // The arrangement plays each clip from its track's file and effective grid.
+    player = std::make_unique<ArrangementPlayer> (audio.master(), [this] (const Clip& clip) -> std::optional<ArrangementPlayer::TrackSource>
+    {
+        const auto material = materialFor (clip.trackId);
+        if (material == nullptr)
+            return std::nullopt;
+        return ArrangementPlayer::TrackSource { material->file, material->analysis.beats };
+    });
+    player->onChanged = [this] { arrangement.repaint(); };
+    playerRate = audio.master().deviceSampleRate();
+
+    arrangement.setMaterialSource ([this] (int64_t id) { return materialFor (id); });
+    arrangement.setClipStateSource ([this] (int64_t id) { return player->clipState (id); });
+    arrangement.onEdit = [this] (const Project& next, const juce::String& name) { editProject (next, name); };
+    arrangement.onSeek = [this] (double beat) { player->seek (beat); };
+    arrangement.onTogglePlay = [this] { togglePlay(); };
+    arrangement.onSnapModeChanged = [this] (SnapMode mode)
+    {
+        transport.setSnapMode (mode);
+        settings.setSnapMode (mode);
+    };
+    arrangement.onFollowChanged = [this] (bool follow)
+    {
+        transport.setFollow (follow);
+        settings.setFollowPlayhead (follow);
+    };
+
+    transport.onPlayPause = [this] { togglePlay(); };
+    transport.onTempo = [this] (double bpm) { editProject (projectEdits::setTempo (project, bpm), "Change tempo"); };
+    transport.onSnapMode = [this] (SnapMode mode)
+    {
+        arrangement.setSnapMode (mode);
+        settings.setSnapMode (mode);
+    };
+    transport.onFollow = [this] (bool follow)
+    {
+        arrangement.setFollow (follow);
+        settings.setFollowPlayhead (follow);
+    };
+    transport.onNew = [this] { newProject(); };
+    transport.onOpen = [this] { chooseProjectToOpen(); };
+    transport.onSaveAs = [this] { chooseSaveAs(); };
+
+    arrangement.setSnapMode (settings.snapMode());
+    transport.setSnapMode (settings.snapMode());
+    arrangement.setFollow (settings.followPlayhead());
+    transport.setFollow (settings.followPlayhead());
+
+    // The project open last time, or the untitled one, or a new one.
+    const auto last = settings.projectFile();
+    std::error_code missing;
+    if (! last.empty() && std::filesystem::exists (last, missing))
+        openProject (last);
+    else if (std::filesystem::exists (settings.untitledProjectFile(), missing))
+        openProject ({});
+    else
+        switchProject (Project::create ("Untitled"), {});
 
     library.onOpenSettings = [this] { SettingsComponent::show (settings, controller, audio); };
     library.onSelectionChanged = [this] (int64_t id)
@@ -101,10 +194,174 @@ MainComponent::~MainComponent()
 {
     stopTimer();
     controller.removeChangeListener (this);
+    if (saveDue)
+        saveNow();
+    player->pause();
+}
+
+//==============================================================================
+// The arrangement
+
+std::shared_ptr<const TrackMaterial> MainComponent::materialFor (int64_t trackId)
+{
+    const auto* track = controller.findTrack (trackId);
+    return track != nullptr ? catalog.get (*track) : nullptr;
+}
+
+void MainComponent::applyProject (const Project& next)
+{
+    project = next;
+    arrangement.setProject (project);
+    player->setProject (project);
+    transport.setTempo (project.tempo);
+    saveDue = juce::Time::getMillisecondCounter() + saveDelayMs;
+}
+
+void MainComponent::editProject (const Project& next, const juce::String& name)
+{
+    if (next == project)
+        return;
+    undo.beginNewTransaction (name);
+    undo.perform (new ProjectEdit ([this] (const Project& p) { applyProject (p); }, project, next));
+}
+
+void MainComponent::togglePlay()
+{
+    if (player->state().playing)
+        player->pause();
+    else
+        player->play();
+}
+
+void MainComponent::switchProject (Project next, const std::filesystem::path& file)
+{
+    // Undo steps for the old project would bring it back over this one.
+    undo.clearUndoHistory();
+    player->pause();
+    player->seek (0.0);
+    projectFile = file;
+    settings.setProjectFile (file);
+    applyProject (next);
+    saveDue.reset();
+    arrangement.selectClip (std::nullopt);
+    updateProjectName();
+}
+
+void MainComponent::openProject (const std::filesystem::path& file)
+{
+    const auto result = ProjectFile::load (file.empty() ? settings.untitledProjectFile() : file);
+    if (const auto* error = std::get_if<ProjectLoadError> (&result))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Cannot open the project",
+                                                fromUtf8 (error->message));
+        if (project.layers.empty())
+            switchProject (Project::create ("Untitled"), {});
+        return;
+    }
+    switchProject (std::get<Project> (result), file);
+}
+
+void MainComponent::newProject()
+{
+    if (saveDue)
+        saveNow();
+    auto start = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        if (safe != nullptr)
+        {
+            safe->switchProject (Project::create ("Untitled", safe->project.tempo), {});
+            safe->saveDue = juce::Time::getMillisecondCounter(); // replaces the untitled file
+        }
+    };
+
+    // An untitled project would be lost: ask first.
+    if (projectFile.empty() && ! project.clips.empty())
+    {
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "New project",
+                                            "The untitled project has not been saved under a name. Start a new one anyway?",
+                                            "Start new", "Cancel", this,
+                                            juce::ModalCallbackFunction::create ([start] (int result) { if (result == 1) start(); }));
+        return;
+    }
+    start();
+}
+
+void MainComponent::chooseProjectToOpen()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Open a project", toFile (projectFile).getParentDirectory(), "*.djmix");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+        if (file == juce::File())
+            return;
+        if (saveDue)
+            saveNow();
+        openProject (toPath (file));
+    });
+}
+
+void MainComponent::chooseSaveAs()
+{
+    const auto suggested = toFile (projectFile.empty() ? std::filesystem::path() : projectFile);
+    chooser = std::make_unique<juce::FileChooser> ("Save the project as", suggested, "*.djmix");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this] (const juce::FileChooser& fc)
+    {
+        auto file = fc.getResult();
+        if (file == juce::File())
+            return;
+        if (! file.hasFileExtension (ProjectFile::extension))
+            file = file.withFileExtension (ProjectFile::extension);
+        project.name = file.getFileNameWithoutExtension().toStdString();
+        projectFile = toPath (file);
+        settings.setProjectFile (projectFile);
+        saveNow();
+        updateProjectName();
+    });
+}
+
+std::filesystem::path MainComponent::saveTarget() const
+{
+    return projectFile.empty() ? settings.untitledProjectFile() : projectFile;
+}
+
+void MainComponent::saveNow()
+{
+    saveDue.reset();
+    std::string error;
+    saveError = ProjectFile::save (project, saveTarget(), error) ? juce::String() : "Not saved: " + fromUtf8 (error);
+}
+
+void MainComponent::updateProjectName()
+{
+    arrangement.setTitle (projectFile.empty() ? juce::String ("Untitled") : toFile (projectFile).getFileNameWithoutExtension());
 }
 
 void MainComponent::timerCallback()
 {
+    // The playhead, and the arrangement's state.
+    const auto state = player->state();
+    arrangement.setPlayhead (state.beat, state.playing);
+    transport.setPlaying (state.playing);
+    transport.setPosition (state.beat);
+    const int rendering = player->rendersPending();
+    if (rendering > 0)
+        transport.setStatus ("Rendering " + juce::String (rendering) + (rendering == 1 ? " clip..." : " clips..."));
+    else
+        transport.setStatus (saveError);
+
+    // A device at another rate needs renders at that rate.
+    const double rate = audio.master().deviceSampleRate();
+    if (rate > 0.0 && ! juce::exactlyEqual (rate, playerRate))
+    {
+        playerRate = rate;
+        player->refresh();
+    }
+    if (saveDue && juce::Time::getMillisecondCounter() >= *saveDue)
+        saveNow();
+
     const auto now = audition.status();
     const bool showing = now.trackId != 0 && now.trackId == selectedTrack
                          && (now.playing || now.loading || ! now.error.empty());
@@ -131,6 +388,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         audition.stop();
         return true;
     }
+    // Space plays and pauses the arrangement (unless typing).
+    if (key == juce::KeyPress::spaceKey)
+    {
+        togglePlay();
+        return true;
+    }
 
     // Undo and redo grid and section edits: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z or Ctrl+Y.
     const auto mods = key.getModifiers();
@@ -155,6 +418,10 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     // The selected track may have finished (re-)analysis, changed colour or gone.
     if (selectedTrack != 0)
         trackView.showTrack (controller.findTrack (selectedTrack));
+
+    // A track in the arrangement may have a new grid (so new renders), colour or file.
+    player->refresh();
+    arrangement.repaint();
 }
 
 void MainComponent::paint (juce::Graphics& g)
@@ -169,18 +436,11 @@ void MainComponent::resized()
     layout.layOutComponents (columns, 3, 0, 0, getWidth(), getHeight(), false, true);
 
     auto right = dummy.getBounds().reduced (6);
-    trackView.setBounds (right.removeFromTop (right.getHeight() / 2));
+    trackView.setBounds (right.removeFromTop (right.getHeight() * 9 / 20));
     right.removeFromTop (6);
+    transport.setBounds (right.removeFromTop (34));
+    right.removeFromTop (4);
     arrangement.setBounds (right);
-}
-
-void MainComponent::Placeholder::paint (juce::Graphics& g)
-{
-    g.setColour (juce::Colour (0xff23282d));
-    g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
-    g.setColour (juce::Colours::grey);
-    g.setFont (15.0f);
-    g.drawFittedText (text, getLocalBounds().reduced (12), juce::Justification::centred, 2);
 }
 
 } // namespace djmix

@@ -42,6 +42,8 @@ public:
     void selectedRowsChanged (int lastRowSelected) override;
     void deleteKeyPressed (int lastRowSelected) override;
     juce::String getCellTooltip (int row, int columnId) override;
+    // Dragging an analysed track into the Arrangement adds it as a clip.
+    juce::var getDragSourceDescription (const juce::SparseSet<int>& rows) override;
 
     // FileDragAndDropTarget
     bool isInterestedInFileDrag (const juce::StringArray& files) override;

@@ -15,6 +15,9 @@ constexpr const char* cuePairKey = "cueOutputs";
 constexpr const char* splitCueKey = "splitCue";
 constexpr const char* cueVolumeKey = "cueVolume";
 constexpr const char* cueModeSettingKey = "cueMode";
+constexpr const char* projectFileKey = "projectFile";
+constexpr const char* snapModeSettingKey = "snapMode";
+constexpr const char* followKey = "followPlayhead";
 constexpr float defaultCueVolume = 0.8f;
 } // namespace
 
@@ -133,6 +136,48 @@ void AppSettings::setCueMode (CueMode mode)
 {
     auto* settings = properties.getUserSettings();
     settings->setValue (cueModeSettingKey, juce::String (std::string (cueModeKey (mode))));
+    settings->saveIfNeeded();
+}
+
+std::filesystem::path AppSettings::projectFile() const
+{
+    const auto text = properties.getUserSettings()->getValue (projectFileKey);
+    return text.isEmpty() ? std::filesystem::path() : pathFromUtf8 (text.toStdString());
+}
+
+void AppSettings::setProjectFile (const std::filesystem::path& file)
+{
+    auto* settings = properties.getUserSettings();
+    settings->setValue (projectFileKey, juce::String::fromUTF8 (pathToUtf8 (file).c_str()));
+    settings->saveIfNeeded();
+}
+
+std::filesystem::path AppSettings::untitledProjectFile() const
+{
+    return dataDirectory() / "Untitled.djmix";
+}
+
+SnapMode AppSettings::snapMode() const
+{
+    return snapModeFromKey (properties.getUserSettings()->getValue (snapModeSettingKey).toStdString()).value_or (SnapMode::bar);
+}
+
+void AppSettings::setSnapMode (SnapMode mode)
+{
+    auto* settings = properties.getUserSettings();
+    settings->setValue (snapModeSettingKey, juce::String (snapModeKey (mode)));
+    settings->saveIfNeeded();
+}
+
+bool AppSettings::followPlayhead() const
+{
+    return properties.getUserSettings()->getBoolValue (followKey, true);
+}
+
+void AppSettings::setFollowPlayhead (bool follow)
+{
+    auto* settings = properties.getUserSettings();
+    settings->setValue (followKey, follow);
     settings->saveIfNeeded();
 }
 

@@ -24,6 +24,8 @@ add_library(djmix_core STATIC
     Source/library/LibraryDatabase.cpp
     Source/library/LibraryFilter.h
     Source/library/LibraryFilter.cpp
+    Source/library/TrackCatalog.h
+    Source/library/TrackCatalog.cpp
     Source/library/TrackColours.h
     Source/library/TrackColours.cpp
     Source/library/TrackOverrides.h
@@ -32,6 +34,10 @@ add_library(djmix_core STATIC
     Source/model/BeatMap.cpp
     Source/model/Project.h
     Source/model/Project.cpp
+    Source/model/ProjectEdits.h
+    Source/model/ProjectEdits.cpp
+    Source/model/Snap.h
+    Source/model/Snap.cpp
     Source/view/EffectiveAnalysis.h
     Source/view/EffectiveAnalysis.cpp
     Source/view/TapTempo.h
@@ -85,6 +91,10 @@ set(DJMIX_SERVICE_SOURCES ${DJMIX_SERVICE_SOURCES} PARENT_SCOPE) # for app/Tests
 
 # UI components the app tests draw into images.
 set(DJMIX_VIEW_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/ArrangementView.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/ArrangementView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TransportBar.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TransportBar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TrackView.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/TrackView.cpp
 )

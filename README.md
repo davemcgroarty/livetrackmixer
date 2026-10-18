@@ -26,8 +26,8 @@ validate against it. `schemas/project.v1.schema.json` describes the app's
 | M2c · Audition on Cue: sections, phrases and tracks; Master/Cue routing | Done |
 | M3 · Grid and section editing, saved as overrides, with undo | Done |
 | M4a · Arrangement engine: project model and `.djmix` files, Rubber Band render cache, Master playback | Done |
-| M4b · Arrangement view: timeline, layers, clips, snapping, transport | Next |
-| M4c · Cue on layer and look-ahead cue | Not started |
+| M4b · Arrangement view: timeline, layers, clips, snapping, transport | Done |
+| M4c · Cue on layer and look-ahead cue | Next |
 | M5–M6 | Not started |
 
 On the synthetic test clips, BPM is within ±0.02 and downbeats are within 13 ms
@@ -165,8 +165,48 @@ Master and Cue, and the Cue volume. **Test cue** beeps on the Cue outputs.
 - On a stereo device, or with **Split** chosen, Cue plays in mono on the left
   and Master in mono on the right, for practising on one pair of headphones.
 
-Master plays the arrangement once the Arrangement view arrives in M4b; until
-then it is silent.
+**Arranging.** The Arrangement below the Track view is a timeline in bars at
+the project tempo, with layers stacked from the top. A new project has one
+layer.
+
+- **Adding clips:** pull a section (from the strip) or a phrase (from the
+  waveform) down out of the Track view and drop it on a layer. You can also
+  drag a track from the Library to add all of it, from its first downbeat.
+  Dropping below the last layer adds a new layer for the clip.
+- **Editing clips:** drag a clip to move it, onto another layer too. Drag
+  either end to trim it; the music under the other end stays put. Moves and
+  trims snap to the snap mode: **Off**, **Beat**, **Bar** or **Phrase** (8
+  bars), in the transport bar or with keys **1-4**. Hold **Alt** to place
+  freely.
+  - **S** splits the clip under the playhead (the selected one, if the
+    playhead is in it).
+  - **Delete** removes the selected clip.
+  - Right-click a clip for the same actions.
+- **Layers:** **M** mutes a layer and **S** solos it. **+ Layer** adds one;
+  right-click a layer's name to rename or remove it.
+- **What clips show:** a clip shows its waveform and section lines in its
+  track's colour, and its name. A clip stretched more than 8% from its own
+  tempo shows how far, in amber.
+- **Rendering:** a clip shows **Rendering...** until its time-stretched audio
+  is ready. After a tempo change it keeps playing the old render, kept on the
+  beat, and shows **Updating...** until the new one arrives.
+- **Playback:** **Space** or **Play** starts and pauses. Click the ruler or an
+  empty part of a lane to move the playhead there (on the snap grid). The
+  position shows as bar.beat.
+- **Follow:** keeps the playhead a third of the way across, so most of the
+  view shows what is coming. It turns off when you scroll by hand. While
+  playing, the next phrase boundary is marked in amber.
+- **Tempo:** type it in the transport bar.
+- **Zoom:** the mouse wheel, a pinch, or **+** and **-**. Shift-wheel scrolls,
+  and **Home** shows the whole arrangement.
+- **Undo:** Cmd/Ctrl+Z undoes arrangement edits, in the same history as grid
+  edits.
+
+Projects save themselves a second after each change. A new project saves to
+`Untitled.djmix` in the app's data folder until you give it a name with
+**Save As...**, and the project open when the app closes opens again next
+time. **Open...** opens another `.djmix` file. **New** starts an empty project,
+asking first if the untitled one has clips in it.
 
 When the app finds a newer (or different) `djanalyze` than the one that
 analysed a track, it analyses the track again in the background; the old
@@ -203,6 +243,11 @@ The Cue player is tested by calling its audio callback directly, with no
 device. The tests check routing, fades (no clicks on start, stop, switch or the
 end of a range), resampling, and that decoded audio is only freed off the audio
 thread. They also replace `operator new` to check the callback never allocates.
+
+The Arrangement view is tested with synthetic mouse events and drops: moving
+and trimming clips with each snap mode, dropping sections and whole tracks,
+the keys, mute and solo, and follow. It also draws 16 clips of a six-minute
+track in about 4 ms a frame in Release.
 
 The arrangement engine is tested the same way, offline. Its main test is the M4
 goal: two 124 BPM click tracks on two layers at a 128 BPM project tempo, played

@@ -8,6 +8,7 @@
 
 #include "engine/CueMode.h"
 #include "engine/OutputRouting.h"
+#include "model/Snap.h"
 
 namespace djmix
 {
@@ -44,6 +45,18 @@ public:
     // What a cue does at the end of its section or phrase.
     CueMode cueMode() const;
     void setCueMode (CueMode mode);
+
+    // The project open when the app last closed; empty for the untitled one.
+    std::filesystem::path projectFile() const;
+    void setProjectFile (const std::filesystem::path& file);
+
+    // Where the untitled project saves itself: <data directory>/Untitled.djmix
+    std::filesystem::path untitledProjectFile() const;
+
+    SnapMode snapMode() const; // bar until chosen
+    void setSnapMode (SnapMode mode);
+    bool followPlayhead() const; // on until turned off
+    void setFollowPlayhead (bool follow);
 
 private:
     mutable juce::ApplicationProperties properties;

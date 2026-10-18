@@ -1,5 +1,7 @@
 #include "LibraryPanel.h"
 
+#include "ArrangementView.h"
+
 #include <algorithm>
 
 #include "AppSettings.h"
@@ -550,6 +552,19 @@ int64_t LibraryPanel::selectedTrackId() const
 {
     const int row = table.getSelectedRow();
     return row >= 0 && row < static_cast<int> (rows.size()) ? rows[static_cast<size_t> (row)].id : 0;
+}
+
+juce::var LibraryPanel::getDragSourceDescription (const juce::SparseSet<int>& selected)
+{
+    if (selected.size() != 1)
+        return {};
+    const int row = selected[0];
+    if (row < 0 || row >= static_cast<int> (rows.size()) || rows[static_cast<size_t> (row)].analysisFile.empty())
+        return {};
+    // The whole track; the Arrangement works out its length from the analysis.
+    auto description = ArrangementView::clipDragDescription (rows[static_cast<size_t> (row)].id, 0.0, 0.0, {});
+    description.getDynamicObject()->setProperty ("wholeTrack", true);
+    return description;
 }
 
 } // namespace djmix

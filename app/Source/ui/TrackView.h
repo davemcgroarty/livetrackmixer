@@ -38,6 +38,9 @@ namespace djmix
 // Alt+arrows to nudge, D to set the downbeat at the pointer, T to tap tempo.
 // The beat a downbeat edit would move is marked while the pointer is over the
 // waveform. Shift-click selects sections; next-door ones merge from the menu.
+//
+// Pull a section (from the strip) or a phrase (from the waveform) down out of
+// the view to drag it into the Arrangement as a clip.
 class TrackView final : public juce::Component,
                         public juce::TooltipClient,
                         private juce::ScrollBar::Listener
@@ -148,6 +151,10 @@ private:
     std::optional<std::pair<int, int>> selectedRun() const;
 
     void handleClick (juce::Point<float> position, juce::ModifierKeys mods);
+    // What dragging from here into the Arrangement carries: the section (in
+    // the strip) or phrase (in the waveform) under `position`.
+    juce::var clipDescriptionAt (juce::Point<float> position) const;
+    void startClipDrag();
     void showEditMenu (juce::Point<float> position);
     void askForBpm();
     void tapTempo();
@@ -180,6 +187,9 @@ private:
     std::optional<juce::Point<float>> hover;
     double dragAnchorTime = 0.0;
     bool dragging = false;
+    juce::Point<float> mouseDownPosition;
+    double rangeStartAtMouseDown = 0.0; // put back if a pan becomes a drag out
+    bool draggedOut = false;
 
     // M3 editing.
     enum class DragKind
