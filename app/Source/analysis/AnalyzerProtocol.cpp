@@ -52,49 +52,78 @@ std::optional<std::string> parseAnalyzerVersion (std::string_view output)
     return std::string (version);
 }
 
+namespace
+{
+// Environment variables in the platform's native encoding: UTF-16 on Windows,
+// where getenv would return them in the ANSI code page and lose any name
+// outside it.
+#ifdef _WIN32
+std::optional<std::wstring> environmentVariable (const wchar_t* name)
+{
+    wchar_t* value = nullptr;
+    size_t length = 0;
+    if (_wdupenv_s (&value, &length, name) != 0 || value == nullptr)
+        return std::nullopt;
+    std::wstring result (value);
+    std::free (value);
+    return result;
+}
+#else
+std::optional<std::string> environmentVariable (const char* name)
+{
+    const char* value = std::getenv (name);
+    if (value == nullptr)
+        return std::nullopt;
+    return std::string (value);
+}
+#endif
+
+template <typename String>
+std::vector<String> split (const String& text, typename String::value_type by)
+{
+    std::vector<String> parts;
+    size_t start = 0;
+    for (size_t i = 0; i <= text.size(); ++i)
+    {
+        if (i == text.size() || text[i] == by)
+        {
+            if (i > start)
+                parts.push_back (text.substr (start, i - start));
+            start = i + 1;
+        }
+    }
+    return parts;
+}
+} // namespace
+
 std::optional<std::filesystem::path> findOnPath (std::string_view name)
 {
     namespace fs = std::filesystem;
+    using Native = fs::path::string_type;
 
 #ifdef _WIN32
-    constexpr char separator = ';';
-    const char* pathExt = std::getenv ("PATHEXT");
-    std::string extensions = pathExt != nullptr ? pathExt : ".COM;.EXE;.BAT;.CMD";
+    constexpr wchar_t separator = L';';
+    const auto extensions = environmentVariable (L"PATHEXT").value_or (L".COM;.EXE;.BAT;.CMD");
+    const auto pathVariable = environmentVariable (L"PATH");
 #else
     constexpr char separator = ':';
-    std::string extensions;
+    const Native extensions;
+    const auto pathVariable = environmentVariable ("PATH");
 #endif
-
-    const char* pathVariable = std::getenv ("PATH");
-    if (pathVariable == nullptr)
+    if (! pathVariable)
         return std::nullopt;
 
-    auto split = [] (const std::string& text, char by)
-    {
-        std::vector<std::string> parts;
-        size_t start = 0;
-        for (size_t i = 0; i <= text.size(); ++i)
-        {
-            if (i == text.size() || text[i] == by)
-            {
-                if (i > start)
-                    parts.push_back (text.substr (start, i - start));
-                start = i + 1;
-            }
-        }
-        return parts;
-    };
-
-    std::vector<std::string> suffixes { "" };
-    for (const auto& extension : split (extensions, ';'))
+    std::vector<Native> suffixes { Native() };
+    for (const auto& extension : split (extensions, separator))
         suffixes.push_back (extension);
 
+    const auto base = fs::path (std::string (name)).native();
     std::error_code error;
-    for (const auto& directory : split (pathVariable, separator))
+    for (const auto& directory : split (*pathVariable, separator))
     {
         for (const auto& suffix : suffixes)
         {
-            const fs::path candidate = fs::path (directory) / (std::string (name) + suffix);
+            const auto candidate = fs::path (directory) / fs::path (base + suffix);
             if (fs::is_regular_file (candidate, error))
                 return candidate;
         }

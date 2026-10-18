@@ -19,7 +19,10 @@ target_link_libraries(djmix_tests PRIVATE
     nlohmann_json_schema_validator::validator
 )
 
+# The tests read settings from environment variables with std::getenv,
+# which MSVC flags as unsafe; that is fine for tests.
 target_compile_definitions(djmix_tests PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
     DJMIX_REALTIME_CHECKS=1
     DJMIX_REPO_ROOT="${PROJECT_SOURCE_DIR}"
 )
@@ -51,6 +54,7 @@ target_link_libraries(djmix_app_tests PRIVATE
     Catch2::Catch2WithMain
 )
 target_compile_definitions(djmix_app_tests PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
     JUCE_STANDALONE_APPLICATION=1
